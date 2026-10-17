@@ -281,17 +281,20 @@
       </div>
 
       <div class="sub">Auto-release window</div>
-      <div class="hint" style="margin-top:-6px;margin-bottom:10px;">If a job's marked done and you don't respond, payment releases automatically after this long.</div>
-      <div class="seg" id="setAutoReleaseSeg">
-        <button class="segbtn" data-hours="24">24 hours</button>
-        <button class="segbtn" data-hours="48">48 hours</button>
-      </div>
+      <div class="hint" style="margin-top:-6px;margin-bottom:10px;">When a worker marks a job done, the poster has 24 hours to approve or report a problem. After that, payment releases to the worker automatically.</div>
 
       <div class="sub">Payment method</div>
       <div class="card" style="margin-bottom:0;padding:13px 14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
-          <span style="font-size:13px;color:var(--ink-soft);" id="setPayStatus">No card added yet</span>
-          <button class="msgbtn" id="setPayBtn">Add card</button>
+          <span style="font-size:13px;color:var(--ink-soft);" id="setPayStatus">You enter your card on Stripe's secure page when you accept a bid.</span>
+        </div>
+      </div>
+
+      <div class="sub">Getting paid (workers)</div>
+      <div class="card" style="margin-bottom:0;padding:13px 14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+          <span style="font-size:13px;color:var(--ink-soft);" id="setPayoutStatus">Connect a payout account so job money reaches you.</span>
+          <button class="msgbtn" id="setPayoutBtn">Set up</button>
         </div>
       </div>
 
@@ -361,6 +364,23 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UazWIt2jte_GjvGmtkSiRg_nKY4GH0u';
 const EDGE_FN_URL = SUPABASE_URL + '/functions/v1/oncall';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let session = null;
+
+// Calls the secure payments/lifecycle function as the logged-in user.
+async function callFn(action, params){
+  const { data } = await sb.auth.getSession();
+  const token = data && data.session && data.session.access_token;
+  if(!token) throw new Error('Please log in again.');
+  const res = await fetch(EDGE_FN_URL, {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token, 'apikey':SUPABASE_ANON_KEY },
+    body: JSON.stringify(Object.assign({action}, params||{})),
+  });
+  let out={};
+  try{ out = await res.json(); }catch(e){}
+  if(!res.ok || out.error) throw new Error(out.error || ('Server error ('+res.status+')'));
+  return out;
+}
+function appBaseUrl(){ return location.origin + location.pathname; }
 
 function escapeHtml(str){
   return String(str==null?'':str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -502,6 +522,16 @@ function feeBreakdown(priceStr, premium){
   return {num, fee, net:num-fee, rate};
 }
 
+async function loadReviews(){
+  const { data, error } = await sb.from('reviews').select('rating, reviewee:profiles!reviews_reviewee_id_fkey(name)');
+  if(error) return;
+  const byName={};
+  (data||[]).forEach(r=>{
+    const n=escapeHtml(r.reviewee && r.reviewee.name || '');
+    (byName[n]=byName[n]||[]).push({rating:r.rating});
+  });
+  state.reviews=byName;
+}
 function avgRating(name){
   const list=state.reviews[name];
   if(!list||list.length===0) return null;
@@ -866,16 +896,28 @@ function renderPost(){
   }).join('');
 
   mineList.querySelectorAll('[data-accept]').forEach(btn=>btn.onclick=()=>{
-    toast('Accepting bids with real payment is coming in the next update.');
+    const [taskId,bidId]=btn.dataset.accept.split(':');
+    acceptBidFlow(taskId, bidId, btn);
   });
-  mineList.querySelectorAll('[data-approve]').forEach(btn=>btn.onclick=()=>{
-    toast('Approving a job is coming in the next update.');
+  mineList.querySelectorAll('[data-approve]').forEach(btn=>btn.onclick=async ()=>{
+    if(!confirm('Approve the job and release payment to the worker? This charges your card.')) return;
+    btn.disabled=true; btn.textContent='Releasing…';
+    try{
+      await callFn('approve_completion',{taskId:btn.dataset.approve});
+      toast('Payment released. Thanks!');
+    }catch(e){ toast(e.message); }
+    renderCurrentTab();
   });
   mineList.querySelectorAll('[data-raterelease]').forEach(btn=>btn.onclick=()=>{
-    toast('Ratings are coming in the next update.');
+    const t=mine.find(x=>x.id===btn.dataset.raterelease);
+    const acc=t && t.bids.find(b=>b.id===t.accepted);
+    openRating(btn.dataset.raterelease, acc?acc.name:'the worker');
   });
   mineList.querySelectorAll('[data-disputeopen]').forEach(btn=>btn.onclick=()=>{
-    toast('Disputes are coming in the next update.');
+    const ov=document.getElementById('disputeOverlay');
+    ov.dataset.taskId=btn.dataset.disputeopen;
+    document.getElementById('disputeReason').value='';
+    ov.classList.add('show');
   });
   mineList.querySelectorAll('[data-opentos]').forEach(a=>a.onclick=(e)=>{
     e.preventDefault();
@@ -1055,7 +1097,7 @@ function renderProfile(){
         if(t.completed){
           payHtml=`<div class="paybox released"><div class="paybox-top released-text">✓ €${feeBreakdown(b.price,b.premium).net} paid out</div></div>`;
         } else if(t.workerCompletedAt){
-          payHtml=`<div class="paybox held"><div class="paybox-top held-text">⏳ Waiting on ${t.poster} to approve</div><div class="paybox-sub">Auto-releases in <span class="mono" data-countdown="${t.id}">calculating…</span> if they don't respond (real app: ${state.settings.autoReleaseHours} hours).</div></div>`;
+          payHtml=`<div class="paybox held"><div class="paybox-top held-text">⏳ Waiting on ${t.poster} to approve</div><div class="paybox-sub">Auto-releases in <span class="mono" data-countdown="${t.id}">calculating…</span> if they don't respond.</div></div>`;
         } else {
           payHtml=`<div class="paybox held"><div class="paybox-top held-text">🔒 Payment held in escrow</div><div class="paybox-sub">Mark the job done once it's finished — payment releases after ${t.poster} approves, or automatically if they don't respond.</div></div>`;
         }
@@ -1080,7 +1122,7 @@ function renderProfile(){
       openThread(entry.task.id, entry.task.posterId, entry.task.poster);
     });
     myBidsList.querySelectorAll('[data-markdone]').forEach(btn=>btn.onclick=()=>{
-      toast('Marking a job done is coming in the next update.');
+      pickCompletionPhoto(btn.dataset.markdone, btn);
     });
   }
 }
@@ -1119,8 +1161,16 @@ async function sendMsg(){
   await loadAndRenderThread(taskId, counterpartId);
 }
 
-// ---------- rating modal (wiring comes in the next update) ----------
+// ---------- rating modal ----------
 let selectedStars=0;
+function openRating(taskId, name){
+  state.pendingRatingTaskId=taskId;
+  selectedStars=0;
+  document.querySelectorAll('#ratingStars .starbtn').forEach(b=>b.classList.remove('lit'));
+  document.getElementById('ratingNote').value='';
+  document.getElementById('ratingWho').textContent='How did '+name+' do?';
+  document.getElementById('ratingOverlay').classList.add('show');
+}
 document.querySelectorAll('#ratingStars .starbtn').forEach(btn=>btn.onclick=()=>{
   selectedStars=parseInt(btn.dataset.star,10);
   document.querySelectorAll('#ratingStars .starbtn').forEach(b=>{
@@ -1129,11 +1179,50 @@ document.querySelectorAll('#ratingStars .starbtn').forEach(btn=>btn.onclick=()=>
 });
 document.getElementById('ratingClose').onclick=()=>document.getElementById('ratingOverlay').classList.remove('show');
 document.getElementById('ratingSkip').onclick=()=>document.getElementById('ratingOverlay').classList.remove('show');
-document.getElementById('ratingSubmit').onclick=()=>document.getElementById('ratingOverlay').classList.remove('show');
+document.getElementById('ratingSubmit').onclick=async ()=>{
+  if(!selectedStars){ toast('Tap a star rating first.'); return; }
+  const btn=document.getElementById('ratingSubmit');
+  btn.disabled=true;
+  try{
+    await callFn('submit_review',{taskId:state.pendingRatingTaskId, rating:selectedStars, text:document.getElementById('ratingNote').value.trim()});
+    document.getElementById('ratingOverlay').classList.remove('show');
+    toast('Thanks for rating!');
+    renderCurrentTab();
+  }catch(e){ toast(e.message); }
+  btn.disabled=false;
+};
 
-// ---------- payment / escrow (real wiring comes in the next update) ----------
-function acceptBidFlow(taskId, bidId){
-  toast('Accepting bids with real payment is coming in the next update.');
+// ---------- payment / escrow (Stripe test mode) ----------
+async function acceptBidFlow(taskId, bidId, btn){
+  if(!confirm('Accept this bid? You\'ll enter your card on Stripe\'s secure page. The money is held, not paid out, until you approve the finished job.')) return;
+  if(btn){ btn.disabled=true; btn.textContent='Opening…'; }
+  try{
+    const { url } = await callFn('create_checkout_session',{taskId, bidId, returnUrl: appBaseUrl()});
+    window.location.href = url;
+  }catch(e){
+    toast(e.message);
+    if(btn){ btn.disabled=false; btn.textContent='Accept'; }
+  }
+}
+
+// Runs once after Stripe sends the person back to the app.
+async function handleReturnFromStripe(){
+  const p=new URLSearchParams(location.search);
+  if(!p.has('paid') && !p.has('paycancel') && !p.has('connect')) return;
+  history.replaceState(null,'',appBaseUrl());
+  if(p.has('paycancel')){ state.tab='post'; toast('Payment cancelled — the bid wasn\'t accepted.'); return; }
+  if(p.has('connect')){
+    state.tab='profile';
+    try{ const r=await callFn('sync_connect_status'); toast(r.ready?'Payout account connected.':'Payout setup not finished yet — you can continue it in Settings.'); }
+    catch(e){ toast(e.message); }
+    return;
+  }
+  state.tab='post';
+  toast('Confirming payment…');
+  try{
+    await callFn('finalize_accept_bid',{taskId:p.get('task'), bidId:p.get('bid'), sessionId:p.get('cs')});
+    toast('Bid accepted — payment is held safely until the job is done.');
+  }catch(e){ toast('Payment problem: '+e.message); }
 }
 document.getElementById('payClose').onclick=()=>{
   document.getElementById('payOverlay').classList.remove('show');
@@ -1143,13 +1232,42 @@ document.getElementById('paySave').onclick=()=>{
   toast('Real card payments are coming in the next update.');
 };
 
-// ---------- completion photo + auto-release escrow (wiring comes in the next update) ----------
-function pickCompletionPhoto(taskId){
-  toast('Marking a job done is coming in the next update.');
+// ---------- completion photo + auto-release escrow ----------
+function pickCompletionPhoto(taskId, btn){
+  const input=document.createElement('input');
+  input.type='file'; input.accept='image/*'; input.setAttribute('capture','environment');
+  input.onchange=async ()=>{
+    const file=input.files && input.files[0];
+    if(!file) return;
+    if(btn){ btn.disabled=true; btn.textContent='Uploading photo…'; }
+    try{
+      const ext=(file.name.split('.').pop()||'jpg');
+      const path=`${session.user.id}/done/${Date.now()}.${ext}`;
+      const { error } = await sb.storage.from('media').upload(path, file, { contentType: file.type });
+      if(error) throw new Error('Could not upload photo: '+error.message);
+      const photoUrl=sb.storage.from('media').getPublicUrl(path).data.publicUrl;
+      await callFn('mark_job_done',{taskId, photoUrl});
+      toast('Marked done — waiting for the poster to approve.');
+    }catch(e){ toast(e.message); }
+    renderCurrentTab();
+  };
+  toast('Add a photo of the finished job.');
+  input.click();
+}
+function findAutoReleaseAt(taskId){
+  const a=(state.myPostedTasks||[]).find(t=>t.id===taskId);
+  if(a) return a.autoReleaseAt;
+  const b=(state.myBids||[]).find(x=>x.task.id===taskId);
+  return b ? b.task.autoReleaseAt : null;
 }
 function tickAutoRelease(){
   document.querySelectorAll('[data-countdown]').forEach(span=>{
-    span.textContent='—';
+    const at=findAutoReleaseAt(span.dataset.countdown);
+    if(!at){ span.textContent='—'; return; }
+    const ms=at-Date.now();
+    if(ms<=0){ span.textContent='releasing soon'; return; }
+    const h=Math.floor(ms/3600000), m=Math.floor(ms%3600000/60000);
+    span.textContent=`${h}h ${m}m`;
   });
 }
 setInterval(tickAutoRelease, 1000);
@@ -1161,9 +1279,11 @@ function openSettings(){
   document.querySelectorAll('#setAutoReleaseSeg .segbtn').forEach(b=>{
     b.classList.toggle('active', parseInt(b.dataset.hours,10)===state.settings.autoReleaseHours);
   });
-  document.getElementById('setPayStatus').textContent = 'Card setup coming in the next update';
-  document.getElementById('setPayBtn').textContent = 'Add card';
   document.getElementById('settingsOverlay').classList.add('show');
+  callFn('sync_connect_status').then(r=>{
+    document.getElementById('setPayoutStatus').textContent = r.ready ? '✓ Payout account connected.' : 'Connect a payout account so job money reaches you.';
+    document.getElementById('setPayoutBtn').textContent = r.ready ? 'Update' : 'Set up';
+  }).catch(()=>{});
 }
 function closeSettings(){
   document.getElementById('settingsOverlay').classList.remove('show');
@@ -1175,9 +1295,14 @@ document.querySelectorAll('#setAutoReleaseSeg .segbtn').forEach(b=>b.onclick=()=
   state.settings.autoReleaseHours=parseInt(b.dataset.hours,10);
   document.querySelectorAll('#setAutoReleaseSeg .segbtn').forEach(x=>x.classList.toggle('active', x===b));
 });
-document.getElementById('setPayBtn').onclick=()=>{
-  closeSettings();
-  document.getElementById('payOverlay').classList.add('show');
+document.getElementById('setPayoutBtn').onclick=async ()=>{
+  const btn=document.getElementById('setPayoutBtn');
+  btn.disabled=true; btn.textContent='Opening…';
+  try{
+    const base=appBaseUrl();
+    const { url } = await callFn('connect_onboarding_link',{ returnUrl: base+'?connect=1', refreshUrl: base+'?connect=1' });
+    window.location.href=url;
+  }catch(e){ toast(e.message); btn.disabled=false; btn.textContent='Set up'; }
 };
 document.getElementById('setTosBtn').onclick=()=>{ closeSettings(); openToS(); };
 document.getElementById('setPrivacyBtn').onclick=()=>{ toast('Full Privacy Policy is being finalised before launch.'); };
@@ -1204,7 +1329,7 @@ function openToS(section){
     <p>Arranging payment outside the app — cash, bank transfer, another app — isn't allowed. Doing so <strong>forfeits the OnCall Guarantee and our dispute-resolution help</strong> for that job. We can only step in on payments that went through OnCall.</p>
 
     <div class="sub" id="tos-disputes">Approval, auto-release & disputes</div>
-    <p>Once a worker marks a job done, the poster can approve it to release payment right away. If the poster doesn't respond within the auto-release window — currently set to <strong>${state.settings.autoReleaseHours} hours</strong> in Settings — payment releases automatically, so a worker's money is never left stuck waiting on someone who's gone quiet.</p>
+    <p>Once a worker marks a job done, the poster can approve it to release payment right away. If the poster doesn't respond within the auto-release window — <strong>24 hours</strong> — payment releases automatically, so a worker's money is never left stuck waiting on someone who's gone quiet.</p>
     <p>If something's wrong with the finished job, the poster can report a problem instead of approving. That pauses the auto-release and opens a dispute for OnCall to review before any money moves.</p>
 
     <div class="sub">OnCall Guarantee</div>
@@ -1225,9 +1350,16 @@ document.getElementById('legalClose').onclick=()=>document.getElementById('legal
 
 // ---------- dispute modal (real wiring comes in the next update) ----------
 document.getElementById('disputeClose').onclick=()=>document.getElementById('disputeOverlay').classList.remove('show');
-document.getElementById('disputeSubmit').onclick=()=>{
-  document.getElementById('disputeOverlay').classList.remove('show');
-  toast('Disputes are coming in the next update.');
+document.getElementById('disputeSubmit').onclick=async ()=>{
+  const ov=document.getElementById('disputeOverlay');
+  const note=document.getElementById('disputeReason').value.trim();
+  if(!note){ toast('Say briefly what went wrong.'); return; }
+  try{
+    await callFn('file_dispute',{taskId:ov.dataset.taskId, note});
+    ov.classList.remove('show');
+    toast('Reported — payment is paused while we review.');
+    renderCurrentTab();
+  }catch(e){ toast(e.message); }
 };
 
 // ---------- bottom nav ----------
@@ -1282,7 +1414,7 @@ document.getElementById('authSubmit').onclick=async ()=>{
     const { error } = await sb.auth.signUp({ email, password });
     btn.disabled=false;
     if(error){ btn.textContent='Create account'; msg.textContent=error.message; msg.style.display='block'; return; }
-    msg.textContent='Account created — check your email to confirm it, then log in below. (If the confirmation link opens a blank or broken page, that’s fine — your account is already confirmed, just come back here.)';
+    msg.textContent='Account created — check your email to confirm it, then log in here.';
     msg.style.display='block';
     authMode='login';
     document.querySelectorAll('#authModeSeg .segbtn').forEach(x=>x.classList.toggle('active', x.dataset.mode==='login'));
@@ -1307,6 +1439,8 @@ async function boot(){
   document.querySelector('.shell').style.display='flex';
   await loadMyProfile();
   if(!state.tradeProfile){ state.tab='profile'; }
+  await handleReturnFromStripe();
+  loadReviews().then(()=>renderCurrentTab());
   renderCurrentTab();
 }
 (async function init(){
