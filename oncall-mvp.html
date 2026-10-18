@@ -49,6 +49,8 @@
   .gheart.saved svg path{fill:#E0475A;stroke:#E0475A;}
   .gday{position:absolute;z-index:2;bottom:8px;left:8px;background:rgba(28,28,30,0.75);color:#fff;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;padding:3px 7px;border-radius:20px;}
   .gbody{padding:10px 11px 12px;}
+  .gcard.featured{border:2px solid var(--premium-ink);}
+  .gfeatured{position:absolute;z-index:2;top:8px;left:8px;background:var(--premium-ink);color:#fff;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;padding:3px 7px;border-radius:20px;}
   .gtitle{font-size:13.5px;font-weight:700;margin:0 0 3px;line-height:1.3;color:var(--ink);}
   .gsub{font-size:11.5px;color:var(--ink-soft);margin:0 0 6px;}
   .gprice{font-size:14.5px;font-weight:800;color:var(--ink);}
@@ -429,6 +431,7 @@ function mapTaskRow(row){
     rated: row.rated,
     autoReleased: row.auto_released,
     autoReleaseAt: row.auto_release_at ? new Date(row.auto_release_at).getTime() : null,
+    featuredUntil: (row.featured_until && new Date(row.featured_until).getTime()>Date.now()) ? new Date(row.featured_until) : null,
   };
 }
 
@@ -532,7 +535,7 @@ function toast(m){
 }
 
 // Must match the Edge Function (the server decides the real fee when a bid is accepted).
-const PLATFORM_FEE_RATE=0.10, PREMIUM_FEE_RATE=0.06, PREMIUM_PRICE='€4.99';
+const PLATFORM_FEE_RATE=0.10, PREMIUM_FEE_RATE=0.06, PREMIUM_PRICE='€4.99', BOOST_PRICE='€1.99';
 function money(n){ return Number.isInteger(n) ? String(n) : n.toFixed(2); }
 // knownFee: euros actually charged (from payments), if the bid was accepted. Otherwise estimate.
 function feeBreakdown(priceStr, knownFee, premium){
@@ -616,7 +619,9 @@ function renderHome(){
     app.innerHTML=`${guaranteeBanner()}<div class="grid"><div class="empty">No jobs match that search yet.</div></div>`;
     return;
   }
-  app.innerHTML=`${guaranteeBanner()}<div class="grid">${filtered.map(gcard).join('')}</div>`;
+  // Featured (Premium posters and boosted jobs) first; otherwise newest first, as loaded.
+  const sorted=[...filtered.filter(t=>t.featuredUntil), ...filtered.filter(t=>!t.featuredUntil)];
+  app.innerHTML=`${guaranteeBanner()}<div class="grid">${sorted.map(gcard).join('')}</div>`;
   wireGridCards();
 }
 
@@ -628,10 +633,11 @@ function gcard(t){
         : `<img src="${t.media.url}" alt="${t.title}">`)
     : (CAT_ICON[t.category] || '🧰');
   return `
-    <div class="gcard" data-open="${t.id}">
+    <div class="gcard ${t.featuredUntil?'featured':''}" data-open="${t.id}">
       <div class="gthumb" style="background:${CAT_BG[t.category] || 'var(--border-soft)'};">
         ${mediaHtml}
         <button class="gheart ${saved?'saved':''}" data-save="${t.id}">${heartIcon(saved)}</button>
+        ${t.featuredUntil?'<span class="gfeatured">⚡ Featured</span>':''}
         <span class="gday">Same-day</span>
       </div>      <div class="gbody">
         <p class="gtitle">${t.title}</p>
@@ -831,7 +837,7 @@ function renderPost(){
       return;
     }
     attachedMedia=null;
-    toast('Job posted — track bids on it under My jobs.');
+    toast(state.tradeProfile && state.tradeProfile.premium ? 'Job posted and Featured at the top of Home for 48 hours.' : 'Job posted — track bids on it under My jobs.');
     state.tab='jobs'; state.jobsView='posted';
     renderCurrentTab();
   };
@@ -899,6 +905,10 @@ function renderPostedList(mineList, mine){
           <button class="msgbtn filled" style="margin-top:10px;width:100%;" data-open="${t.id}">Message ${acc.name}</button>
         `}
       `:`
+        ${t.featuredUntil
+          ? `<div class="paybox held" style="margin-bottom:10px;"><div class="paybox-top held-text">⚡ Featured on Home</div><div class="paybox-sub">Pinned at the top until ${fmtDateTime(t.featuredUntil)}.</div></div>`
+          : `<button class="btn ghost" style="margin-bottom:6px;" data-boost="${t.id}">⚡ Boost this job — ${BOOST_PRICE}</button>
+             <div class="hint" style="margin:0 0 12px;">Pins it at the top of Home for 48 hours so it gets bids faster. Premium members' jobs are featured free.</div>`}
         <div class="paynote">Payments happen through OnCall only — arranging cash payment outside the app isn't covered by the OnCall Guarantee.</div>
         <div class="sub" style="margin:6px 0 2px;">${t.bids.length} bid${t.bids.length===1?'':'s'}</div>
         ${t.bids.length===0?`<div style="font-size:12.5px;color:var(--ink-faint);">No bids yet.</div>`:
@@ -918,6 +928,13 @@ function renderPostedList(mineList, mine){
     </div>`;
   }).join('');
 
+  mineList.querySelectorAll('[data-boost]').forEach(btn=>btn.onclick=async ()=>{
+    btn.disabled=true; btn.textContent='Opening…';
+    try{
+      const { url } = await callFn('create_boost_checkout',{ taskId: btn.dataset.boost, returnUrl: appBaseUrl() });
+      window.location.href=url;
+    }catch(e){ toast(e.message); btn.disabled=false; btn.textContent=`⚡ Boost this job — ${BOOST_PRICE}`; }
+  });
   mineList.querySelectorAll('[data-accept]').forEach(btn=>btn.onclick=()=>{
     const [taskId,bidId]=btn.dataset.accept.split(':');
     acceptBidFlow(taskId, bidId, btn);
@@ -1251,9 +1268,16 @@ async function acceptBidFlow(taskId, bidId, btn){
 // Runs once after Stripe sends the person back to the app.
 async function handleReturnFromStripe(){
   const p=new URLSearchParams(location.search);
-  if(!p.has('paid') && !p.has('paycancel') && !p.has('connect') && !p.has('premium') && !p.has('premiumcancel')) return;
+  if(!['paid','paycancel','connect','premium','premiumcancel','boosted','boostcancel'].some(k=>p.has(k))) return;
   history.replaceState(null,'',appBaseUrl());
   if(p.has('paycancel')){ state.tab='jobs'; state.jobsView='posted'; toast('Payment cancelled — the bid wasn\'t accepted.'); return; }
+  if(p.has('boostcancel')){ state.tab='jobs'; state.jobsView='posted'; toast('No problem — you haven\'t been charged.'); return; }
+  if(p.has('boosted')){
+    state.tab='jobs'; state.jobsView='posted';
+    try{ await callFn('finalize_boost',{ sessionId: p.get('cs') }); toast('Boosted! Your job is Featured at the top of Home for 48 hours.'); }
+    catch(e){ toast('Boost problem: '+e.message); }
+    return;
+  }
   if(p.has('premiumcancel')){ state.tab='profile'; toast('No problem — you haven\'t been charged.'); return; }
   if(p.has('premium')){
     state.tab='profile';
@@ -1327,6 +1351,7 @@ setInterval(tickAutoRelease, 1000);
 
 // ---------- Premium card (Profile page) ----------
 function fmtDate(d){ return d ? new Date(d).toLocaleDateString('en-IE',{day:'numeric',month:'short'}) : ''; }
+function fmtDateTime(d){ return d ? new Date(d).toLocaleString('en-IE',{weekday:'short',hour:'numeric',minute:'2-digit'}) : ''; }
 function renderPremiumCard(){
   const card=document.getElementById('premiumCard');
   if(!card || !state.tradeProfile) return;
@@ -1340,6 +1365,9 @@ function renderPremiumCard(){
       <span class="badge ${active?'':'muted'}">${active?(cancelling?'Ending':'Active'):'Not active'}</span>
     </div>
     <div class="card-desc">
+      <strong>When you post jobs</strong><br>
+      • Your jobs are <strong>Featured</strong> at the top of Home for 48 hours — more bids, faster<br>
+      <strong style="display:inline-block;margin-top:6px;">When you do jobs</strong><br>
       • Pay a <strong>6% fee</strong> instead of 10% on jobs you win<br>
       • A <strong>Premium badge</strong> next to your name on every bid
     </div>
@@ -1426,6 +1454,7 @@ function openToS(section){
 
     <div class="sub">Fees & Premium</div>
     <p>OnCall keeps a <strong>10% fee</strong> from the price of each job; the worker receives the rest. Workers with <strong>OnCall Premium</strong> (${PREMIUM_PRICE} a month, cancel anytime) pay a <strong>6% fee</strong> instead. The fee is fixed at the moment a bid is accepted. Cancelling Premium stops future charges; you keep Premium until the end of the month you've paid for. No refunds for part months.</p>
+    <p><strong>Boost</strong> (${BOOST_PRICE} per job) pins one job at the top of Home for 48 hours. It's charged once, and isn't refunded if the job gets no bids or you cancel it.</p>
 
     <div class="sub">1. Photo evidence before payout</div>
     <p>A worker must mark the job done <strong>with a photo</strong> of the finished work before any payment is released. No photo, no payout — this protects both sides if something's disputed later.</p>

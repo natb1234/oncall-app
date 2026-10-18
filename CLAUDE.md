@@ -27,13 +27,19 @@ On release the server captures the payment and, if the worker's Stripe Connect a
 Bottom tabs: Home (job feed), Saved, Post (form only), **My jobs** (switch between Posted — your jobs with bids, accept/pay, approve, rate — and Bidding — your bids, mark done, payout status), Inbox, Profile (profile card, Premium card, then everything that used to be in Settings: notifications (demo), payout setup, Terms, Privacy, Log out — the ⚙️ button scrolls there). Returning from Stripe Checkout lands on My jobs → Posted; from Premium checkout, on Profile.
 
 ## Premium
-Real Stripe subscription, €4.99/month (Checkout `mode: subscription`, inline price, subscription metadata `oncall=premium`). Perks: 6% fee instead of 10% on jobs won (fee fixed in `finalize_accept_bid` from a live Stripe check) and a ★ Premium badge on bids. Stripe is the source of truth; `profiles.premium` / `premium_until` are a copy written only by the function (`sync_premium`), re-checked by the timer when `premium_until` passes. Cancel = `cancel_at_period_end` (and undo) via `set_premium_renewal`; no Stripe customer portal needed. No webhooks.
+Real Stripe subscription, €4.99/month (Checkout `mode: subscription`, inline price, subscription metadata `oncall=premium`). Perks for workers: 6% fee instead of 10% on jobs won (fee fixed in `finalize_accept_bid` from a live Stripe check) and a ★ Premium badge on bids. Perk for posters: their new jobs are Featured (pinned to the top of Home, gold border) for 48h — set by the `prepare_new_task` insert trigger from `profiles.premium`.
+
+## Boost
+One-off €1.99 per job (any poster, open jobs only): `create_boost_checkout` → Stripe Checkout → back to `?boosted=1&cs=…` → `finalize_boost` sets `tasks.featured_until` = now+48h (idempotent via `boost_session_id`). If the poster never returns to the app after paying, the boost isn't applied (no webhook) — refund manually if that ever happens.
+
+## New-job trigger
+`prepare_new_task` (before insert on tasks) forces all lifecycle/money columns to their defaults, because the `authenticated` role has table-level INSERT on tasks. Only the form fields the app sends are kept. Stripe is the source of truth; `profiles.premium` / `premium_until` are a copy written only by the function (`sync_premium`), re-checked by the timer when `premium_until` passes. Cancel = `cancel_at_period_end` (and undo) via `set_premium_renewal`; no Stripe customer portal needed. No webhooks.
 
 ## Edge Function actions
-`create_checkout_session`, `finalize_accept_bid` (takes Checkout `sessionId`), `mark_job_done` (photo required, server sets 24h window), `approve_completion`, `file_dispute`, `submit_review`, `connect_onboarding_link`, `sync_connect_status`, `create_premium_checkout`, `sync_premium`, `set_premium_renewal`, `auto_release_sweep` (timer only). `create_payment_intent` is legacy/unused.
+`create_checkout_session`, `finalize_accept_bid` (takes Checkout `sessionId`), `mark_job_done` (photo required, server sets 24h window), `approve_completion`, `file_dispute`, `submit_review`, `connect_onboarding_link`, `sync_connect_status`, `create_premium_checkout`, `sync_premium`, `set_premium_renewal`, `create_boost_checkout`, `finalize_boost`, `auto_release_sweep` (timer only). `create_payment_intent` is legacy/unused.
 
 ## Status (as of 18 Oct 2026, evening)
-- Deployed function version 10 (Premium subscription; pending-payout catch-up, retried every timer run with a 10-minute idempotency window so a failed attempt isn't stuck for 24h, and checks Stripe for an existing transfer before paying; worker Connect accounts prefilled as Irish individuals so they skip company questions — unfinished accounts without the `oncall_prefill` metadata tag are replaced). Stripe sandbox needed "Accounts v1 support" switched on (Settings → API policies) for Connect account creation; consider moving to Accounts v2 before live. `premium` is not client-writable. Poster now sees the "job done" photo after payout and during a dispute.
+- Deployed function version 11 (Boost; Premium subscription; pending-payout catch-up, retried every timer run with a 10-minute idempotency window so a failed attempt isn't stuck for 24h, and checks Stripe for an existing transfer before paying; worker Connect accounts prefilled as Irish individuals so they skip company questions — unfinished accounts without the `oncall_prefill` metadata tag are replaced). Stripe sandbox needed "Accounts v1 support" switched on (Settings → API policies) for Connect account creation; consider moving to Accounts v2 before live. `premium` is not client-writable. Poster now sees the "job done" photo after payout and during a dispute.
 
 Tested end to end in the user's hands: signup/login, profile, post job with photo, bid, messaging, accept + pay with test card 4242…, mark done with photo, approve & release, rating, reminder email, worker payout onboarding (Connect), and automatic payout to the worker on approval ("Moving furniture" €40 → €36 transferred 2 s after approval, 18 Oct). The earlier stuck €54 was also paid.
 
@@ -42,7 +48,7 @@ Test accounts: `natbooth252@gmail.com` (poster) and `natbooth252+worker@gmail.co
 ## To-do, most important first
 1. **Domain** for Resend so reminder emails reach real users; then set `EMAIL_FROM`.
 2. Leftovers to clean up — deletes from chat time out (Supabase holds them for a confirmation), so do it in the dashboard: test task "TEST reminder email (ignore)" (id `da8911db-…`, nothing references it), table `public.site_pages`, Storage bucket `site` (holds one old `oncall-mvp.html`).
-3. **Test Premium** with card 4242: Profile → Go Premium → pay → badge shows; win a job and check the fee is 6%; Cancel Premium shows "Ends on …".
+3. **Test Premium & Boost** with card 4242: Profile → Go Premium → pay → badge shows; as a Premium poster, a new job shows Featured on Home; win a job and check the fee is 6%; Cancel Premium shows "Ends on …". As a non-Premium poster, My jobs → Boost this job → pay → job is Featured.
 4. Before launch: switch Stripe to live keys, solicitor-reviewed terms, ID verification is currently a fake toggle (`verified` set by the client).
 
 ## How to ship changes

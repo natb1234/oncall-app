@@ -13,6 +13,8 @@ import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 const PLATFORM_FEE_PERCENT = 10;         // OnCall's cut on a job.
 const PREMIUM_PLATFORM_FEE_PERCENT = 6;  // Cut when the winning worker has Premium at the moment the bid is accepted.
 const PREMIUM_PRICE_CENTS = 499;         // Premium: €4.99 a month.
+const BOOST_PRICE_CENTS = 199;           // One-off "Boost this job": €1.99.
+const FEATURED_HOURS = 48;               // How long a boosted (or Premium poster's) job stays Featured.
 const AUTO_RELEASE_HOURS = 24;   // Poster's window to approve or report a problem. Server-controlled only.
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!);
@@ -97,6 +99,10 @@ Deno.serve(async (req: Request) => {
         return json(await syncPremium(caller.id));
       case "set_premium_renewal":
         return await setPremiumRenewal(caller, body);
+      case "create_boost_checkout":
+        return await createBoostCheckout(caller, body);
+      case "finalize_boost":
+        return await finalizeBoost(caller, body);
       default:
         return json({ error: "Unknown action." }, 400);
     }
@@ -536,6 +542,61 @@ async function setPremiumRenewal(caller: any, body: any) {
   if (!sub) return json({ error: "You don't have Premium." }, 400);
   await stripe.subscriptions.update(sub.id, { cancel_at_period_end: !renew });
   return json(await syncPremium(caller.id));
+}
+
+// ---------- 7c. Boost a job (€1.99 one-off): Featured at the top of Home for 48h ----------
+function isFeatured(task: any) {
+  return !!task.featured_until && new Date(task.featured_until).getTime() > Date.now();
+}
+
+async function createBoostCheckout(caller: any, body: any) {
+  const { taskId, returnUrl } = body;
+  if (typeof returnUrl !== "string" || !returnUrl.startsWith(ALLOWED_RETURN_PREFIX)) {
+    return json({ error: "Invalid return address." }, 400);
+  }
+  const { data: task } = await db.from("tasks").select("*").eq("id", taskId).single();
+  if (!task) return json({ error: "Job not found." }, 404);
+  if (task.poster_id !== caller.id) return json({ error: "You can only boost your own jobs." }, 403);
+  if (task.accepted_bid_id || task.completed) return json({ error: "This job already has a worker." }, 400);
+  if (isFeatured(task)) return json({ error: "This job is already Featured." }, 400);
+
+  const customerId = await getOrCreateCustomer(caller);
+  const base = returnUrl.split("?")[0].split("#")[0];
+  const checkout = await stripe.checkout.sessions.create({
+    mode: "payment",
+    customer: customerId,
+    payment_method_types: ["card"],
+    line_items: [{
+      quantity: 1,
+      price_data: {
+        currency: "eur",
+        unit_amount: BOOST_PRICE_CENTS,
+        product_data: { name: `Boost: ${String(task.title).slice(0, 60)}` },
+      },
+    }],
+    metadata: { oncall: "boost", taskId, posterId: caller.id },
+    success_url: `${base}?boosted=1&task=${taskId}&cs={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${base}?boostcancel=1`,
+  });
+  return json({ url: checkout.url });
+}
+
+// Called when the poster comes back from paying. Safe to call twice for the same payment.
+async function finalizeBoost(caller: any, body: any) {
+  const { sessionId } = body;
+  if (typeof sessionId !== "string") return json({ error: "Missing payment reference." }, 400);
+  const cs = await stripe.checkout.sessions.retrieve(sessionId);
+  if (cs.metadata?.oncall !== "boost" || cs.metadata?.posterId !== caller.id) {
+    return json({ error: "That payment isn't a boost for one of your jobs." }, 400);
+  }
+  if (cs.payment_status !== "paid") return json({ error: "Payment hasn't gone through yet." }, 400);
+  const taskId = cs.metadata.taskId;
+  const { data: task } = await db.from("tasks").select("*").eq("id", taskId).single();
+  if (!task) return json({ error: "Job not found." }, 404);
+  if (task.boost_session_id === sessionId) return json({ ok: true, featuredUntil: task.featured_until });
+  const featuredUntil = new Date(Date.now() + FEATURED_HOURS * 3600 * 1000).toISOString();
+  await db.from("tasks").update({ featured_until: featuredUntil, boost_session_id: sessionId }).eq("id", taskId);
+  return json({ ok: true, featuredUntil });
 }
 
 // ---------- 8a. Reminder email to the poster ~4 hours before auto-release ----------
