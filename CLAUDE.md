@@ -23,6 +23,9 @@ A small same-day task marketplace (Ireland, EUR). Posters post small jobs, worke
 ## Payouts
 On release the server captures the payment and, if the worker's Stripe Connect account has `transfers` active, transfers amount minus 10% (recorded in `payments.payout_transfer_id` / `paid_out_at`). If not, the money waits in the platform balance; it's sent automatically when the worker finishes "Getting paid" setup (`sync_connect_status`) or on the next 15-min timer run. Stripe idempotency key `oncall-payout-<taskId>` prevents double payment.
 
+## App layout
+Bottom tabs: Home (job feed), Saved, Post (form only), **My jobs** (switch between Posted — your jobs with bids, accept/pay, approve, rate — and Bidding — your bids, mark done, payout status), Inbox, Profile. Returning from Stripe Checkout lands on My jobs → Posted.
+
 ## Edge Function actions
 `create_checkout_session`, `finalize_accept_bid` (takes Checkout `sessionId`), `mark_job_done` (photo required, server sets 24h window), `approve_completion`, `file_dispute`, `submit_review`, `connect_onboarding_link`, `sync_connect_status`, `auto_release_sweep` (timer only). `create_payment_intent` is legacy/unused.
 

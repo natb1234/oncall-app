@@ -584,7 +584,7 @@ function renderTopbar(){
     document.getElementById('searchInput').oninput=e=>{state.homeFilter.q=e.target.value;renderHome();};
     wrap.querySelectorAll('.catpill').forEach(p=>p.onclick=()=>{state.homeFilter.cat=p.dataset.cat;renderTopbar();renderHome();});
   } else {
-    const titles={browse:'Saved jobs', post:'Post a job', inbox:'Inbox', profile:'Profile'};
+    const titles={browse:'Saved jobs', post:'Post a job', jobs:'My jobs', inbox:'Inbox', profile:'Profile'};
     wrap.innerHTML=`<div class="topbar"><div class="brand-row"><h1>${titles[state.tab]}</h1><div style="display:flex;align-items:center;gap:6px;"><span class="tag">MVP Prototype</span><button class="iconbtn" id="settingsBtn" aria-label="Settings">⚙️</button></div></div></div>`;
   }
   const settingsBtn=document.getElementById('settingsBtn');
@@ -719,7 +719,6 @@ function renderBrowse(){
 // ---------- post ----------
 function renderPost(){
   const app=document.getElementById('app');
-  const mine=state.myPostedTasks||[];
   app.innerHTML=`
     ${guaranteeBanner()}
     <div class="sub">Post a job</div>
@@ -742,9 +741,6 @@ function renderPost(){
       <div class="hint">Showing what needs doing — a messy yard, a broken fence panel — gets better bids than text alone.</div>
     </div>
     <button class="btn accent" id="postTask">Post job</button>
-
-    <div class="sub" style="margin-top:26px;">Your posted jobs</div>
-    <div id="mineList"></div>
   `;
 
   let attachedMedia=null;
@@ -823,11 +819,14 @@ function renderPost(){
       return;
     }
     attachedMedia=null;
-    toast('Job posted — visible in Home now.');
+    toast('Job posted — track bids on it under My jobs.');
+    state.tab='jobs'; state.jobsView='posted';
     renderCurrentTab();
   };
+}
 
-  const mineList=document.getElementById('mineList');
+// Jobs I posted, with their bids, payment and approval controls.
+function renderPostedList(mineList, mine){
   if(mine.length===0){
     mineList.innerHTML=`<div class="empty" style="grid-column:unset;">Jobs you post will show up here with incoming bids.</div>`;
     return;
@@ -943,6 +942,25 @@ function renderPost(){
   });
 }
 
+// ---------- my jobs (posted + bidding) ----------
+function renderJobs(){
+  const app=document.getElementById('app');
+  const view=state.jobsView||'posted';
+  const posted=state.myPostedTasks||[];
+  const bids=state.myBids||[];
+  app.innerHTML=`
+    <div class="seg" id="jobsSeg" style="margin-bottom:16px;">
+      <button class="segbtn ${view==='posted'?'active':''}" data-view="posted">Posted (${posted.length})</button>
+      <button class="segbtn ${view==='bidding'?'active':''}" data-view="bidding">Bidding (${bids.length})</button>
+    </div>
+    <div id="jobsList"></div>
+  `;
+  app.querySelectorAll('#jobsSeg .segbtn').forEach(b=>b.onclick=()=>{ state.jobsView=b.dataset.view; renderJobs(); });
+  const list=document.getElementById('jobsList');
+  if(view==='posted') renderPostedList(list, posted);
+  else renderBidsList(list, bids);
+}
+
 // ---------- inbox ----------
 function renderInbox(){
   const app=document.getElementById('app');
@@ -1045,7 +1063,6 @@ function renderProfile(){
   }
 
   const p=state.tradeProfile;
-  const myBids=state.myBids||[];
 
   app.innerHTML=`
     <div class="profcard">
@@ -1060,8 +1077,6 @@ function renderProfile(){
       ${!p.verified?`<button class="verifybtn" id="verifyLaterBtn" style="margin-top:12px;">🪪 Verify phone number & photo ID</button>`:''}
     </div>
 
-    <div class="sub">My bids</div>
-    <div id="myBidsList"></div>
   `;
   const verifyLaterBtn=document.getElementById('verifyLaterBtn');
   if(verifyLaterBtn){
@@ -1071,7 +1086,10 @@ function renderProfile(){
     };
   }
 
-  const myBidsList=document.getElementById('myBidsList');
+}
+
+// Jobs I've bid on, with status, payout and "mark done" controls.
+function renderBidsList(myBidsList, myBids){
   if(myBids.length===0){
     myBidsList.innerHTML=`<div class="empty" style="grid-column:unset;">Bids you place will show up here with their status.</div>`;
   } else {
@@ -1205,14 +1223,14 @@ async function handleReturnFromStripe(){
   const p=new URLSearchParams(location.search);
   if(!p.has('paid') && !p.has('paycancel') && !p.has('connect')) return;
   history.replaceState(null,'',appBaseUrl());
-  if(p.has('paycancel')){ state.tab='post'; toast('Payment cancelled — the bid wasn\'t accepted.'); return; }
+  if(p.has('paycancel')){ state.tab='jobs'; state.jobsView='posted'; toast('Payment cancelled — the bid wasn\'t accepted.'); return; }
   if(p.has('connect')){
     state.tab='profile';
     try{ const r=await callFn('sync_connect_status'); toast(r.paid?`Payout account connected — €${money(r.paidAmount)} from finished jobs is on its way to you.`:(r.ready?'Payout account connected.':'Payout setup not finished yet — you can continue it in Settings.')); }
     catch(e){ toast(e.message); }
     return;
   }
-  state.tab='post';
+  state.tab='jobs'; state.jobsView='posted';
   toast('Confirming payment…');
   try{
     await callFn('finalize_accept_bid',{taskId:p.get('task'), bidId:p.get('bid'), sessionId:p.get('cs')});
@@ -1362,6 +1380,7 @@ const NAV_ITEMS=[
   {id:'home', label:'Home', icon:`<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M3 11l9-7 9 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v9a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1v-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`},
   {id:'browse', label:'Saved', icon:`<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-4.5-9.5-9C.7 8.4 2.3 4.5 6 4.5c2 0 3.4 1.1 4 2.3.6-1.2 2-2.3 4-2.3 3.7 0 5.3 3.9 3.5 7.5C19 16.5 12 21 12 21z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>`},
   {id:'post', label:'Post', icon:`<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`},
+  {id:'jobs', label:'My jobs', icon:`<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="5" y="4" width="14" height="17" rx="2" stroke="currentColor" stroke-width="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`},
   {id:'inbox', label:'Inbox', icon:`<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="2"/><path d="M3 7l9 6 9-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`},
   {id:'profile', label:'Profile', icon:`<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`},
 ];
@@ -1382,9 +1401,10 @@ async function renderCurrentTab(){
   renderNav();
   if(state.tab==='home'){ await loadHomeTasks(); renderHome(); }
   else if(state.tab==='browse'){ await loadSavedTasksData(); renderBrowse(); }
-  else if(state.tab==='post'){ await loadMyPostedTasks(); renderPost(); }
+  else if(state.tab==='post'){ renderPost(); }
+  else if(state.tab==='jobs'){ await Promise.all([loadMyPostedTasks(), loadMyBids()]); renderJobs(); }
   else if(state.tab==='inbox'){ await loadInboxThreads(); renderInbox(); }
-  else if(state.tab==='profile'){ await loadMyBids(); renderProfile(); }
+  else if(state.tab==='profile'){ renderProfile(); }
 }
 
 // ---------- auth screen ----------
