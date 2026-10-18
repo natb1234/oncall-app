@@ -396,6 +396,17 @@ async function submitReview(caller: any, body: any) {
 }
 
 // ---------- 6. Worker connects their payout account (Stripe-hosted onboarding) ----------
+// Workers are ordinary people, not companies: telling Stripe up front skips the
+// company questions, and filling in what OnCall is skips the "describe your business" step.
+const WORKER_ACCOUNT_PREFILL = {
+  business_type: "individual" as const,
+  business_profile: {
+    mcc: "7299", // Miscellaneous personal services
+    url: "https://natb1234.github.io/oncall-app/",
+    product_description: "Small same-day local jobs (odd jobs, help around the home) booked and paid through OnCall.",
+  },
+};
+
 async function connectOnboardingLink(caller: any, body: any) {
   const { returnUrl, refreshUrl } = body;
   if (typeof returnUrl !== "string" || !returnUrl.startsWith(ALLOWED_RETURN_PREFIX) ||
@@ -404,11 +415,25 @@ async function connectOnboardingLink(caller: any, body: any) {
   }
   const { data: profile } = await db.from("profiles").select("*").eq("id", caller.id).single();
   let accountId: string | null = profile?.stripe_connect_account_id ?? null;
+
+  if (accountId) {
+    // An unfinished account made before the prefill existed (no oncall_prefill tag)
+    // is replaced with a fresh prefilled one.
+    // Stripe won't let us edit it once a setup link has been opened, and an
+    // unfinished account can't hold any money, so nothing is lost.
+    const existing = await stripe.accounts.retrieve(accountId);
+    if (!existing.details_submitted && existing.metadata?.oncall_prefill !== "1") {
+      accountId = null;
+    }
+  }
+
   if (!accountId) {
     const account = await stripe.accounts.create({
       type: "express",
+      country: "IE",
       email: caller.email,
-      metadata: { supabase_user_id: caller.id },
+      ...WORKER_ACCOUNT_PREFILL,
+      metadata: { supabase_user_id: caller.id, oncall_prefill: "1" },
     });
     accountId = account.id;
     await db.from("profiles").update({ stripe_connect_account_id: accountId }).eq("id", caller.id);

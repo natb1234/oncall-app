@@ -27,7 +27,7 @@ On release the server captures the payment and, if the worker's Stripe Connect a
 `create_checkout_session`, `finalize_accept_bid` (takes Checkout `sessionId`), `mark_job_done` (photo required, server sets 24h window), `approve_completion`, `file_dispute`, `submit_review`, `connect_onboarding_link`, `sync_connect_status`, `auto_release_sweep` (timer only). `create_payment_intent` is legacy/unused.
 
 ## Status (as of 18 Oct 2026, evening)
-- Deployed function version 7 (pending-payout catch-up). Premium hidden in the app and `premium` no longer client-writable. Poster now sees the "job done" photo after payout and during a dispute.
+- Deployed function version 8 (pending-payout catch-up; worker Connect accounts prefilled as Irish individuals so they skip company questions — unfinished accounts without the `oncall_prefill` metadata tag are replaced). Stripe sandbox needed "Accounts v1 support" switched on (Settings → API policies) for Connect account creation; consider moving to Accounts v2 before live. Premium hidden in the app and `premium` no longer client-writable. Poster now sees the "job done" photo after payout and during a dispute.
 
 Tested end to end in the user's hands: signup/login, profile, post job with photo, bid, messaging, accept + pay with test card 4242…, mark done with photo, approve & release, rating, reminder email.
 
