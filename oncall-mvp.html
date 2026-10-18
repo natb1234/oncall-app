@@ -515,11 +515,13 @@ function toast(m){
   clearTimeout(window.__tt); window.__tt=setTimeout(()=>t.classList.remove('show'),1900);
 }
 
-function feeBreakdown(priceStr, premium){
-  const num=parseFloat(String(priceStr).replace(/[^0-9.]/g,''))||0;
-  const rate=premium?0.06:0.10;
-  const fee=Math.round(num*rate);
-  return {num, fee, net:num-fee, rate};
+// Must match PLATFORM_FEE_PERCENT in the oncall Edge Function (the server decides the real fee).
+const PLATFORM_FEE_RATE=0.10;
+function money(n){ return Number.isInteger(n) ? String(n) : n.toFixed(2); }
+function feeBreakdown(priceStr){
+  const cents=Math.round((parseFloat(String(priceStr).replace(/[^0-9.]/g,''))||0)*100);
+  const feeCents=Math.round(cents*PLATFORM_FEE_RATE);
+  return {num:money(cents/100), fee:money(feeCents/100), net:money((cents-feeCents)/100), rate:PLATFORM_FEE_RATE};
 }
 
 async function loadReviews(){
@@ -677,7 +679,7 @@ async function submitBid(){
   const note=document.getElementById('bidNote').value.trim();
   const btn=document.getElementById('bidSubmit');
   btn.textContent='Sending…'; btn.disabled=true;
-  const { error } = await sb.from('bids').insert({ task_id:tid, worker_id:session.user.id, price, note: note||null, premium: !!(state.tradeProfile && state.tradeProfile.premium) });
+  const { error } = await sb.from('bids').insert({ task_id:tid, worker_id:session.user.id, price, note: note||null });
   btn.textContent='Send bid'; btn.disabled=false;
   document.getElementById('bidOverlay').classList.remove('show');
   const t=state.pendingBidTask;
@@ -840,18 +842,20 @@ function renderPost(){
       `:''}
       ${acc?`
         <div class="feebox">
-          <div><span>Accepted bid — ${acc.name}${acc.premium?' (Premium)':''}</span><span>${acc.price}</span></div>
-          <div><span>Platform fee (${Math.round(feeBreakdown(acc.price,acc.premium).rate*100)}%)</span><span>-€${feeBreakdown(acc.price,acc.premium).fee}</span></div>
-          <div><span><strong>Tradesperson receives</strong></span><span><strong>€${feeBreakdown(acc.price,acc.premium).net}</strong></span></div>
+          <div><span>Accepted bid — ${acc.name}</span><span>${acc.price}</span></div>
+          <div><span>Platform fee (${Math.round(feeBreakdown(acc.price).rate*100)}%)</span><span>-€${feeBreakdown(acc.price).fee}</span></div>
+          <div><span><strong>Tradesperson receives</strong></span><span><strong>€${feeBreakdown(acc.price).net}</strong></span></div>
         </div>
         ${t.completed?`
+          ${t.completionPhoto?`<div class="mediapreview" style="margin:10px 0;"><img src="${t.completionPhoto.url}" alt="Completed job" style="max-height:140px;"></div>`:''}
           <div class="paybox released">
-            <div class="paybox-top released-text">✓ €${feeBreakdown(acc.price,acc.premium).net} released to ${acc.name}</div>
+            <div class="paybox-top released-text">✓ €${feeBreakdown(acc.price).net} released to ${acc.name}</div>
             <div class="paybox-sub">${t.disputed?'Resolved — paid out through OnCall.':(t.autoReleased?'Auto-released after no response — paid out through OnCall.':'Job complete — paid out through OnCall.')}</div>
           </div>
           ${!t.rated?`<button class="msgbtn" style="margin-top:10px;" data-raterelease="${t.id}">Rate ${acc.name}</button>`:''}
         `:t.workerCompletedAt?`
           ${t.disputed?`
+            ${t.completionPhoto?`<div class="mediapreview" style="margin:10px 0;"><img src="${t.completionPhoto.url}" alt="Completed job" style="max-height:140px;"></div>`:''}
             <div class="paybox held">
               <div class="paybox-top held-text">⚠️ Dispute filed</div>
               <div class="paybox-sub">Auto-release is paused. Our team reviews the evidence and messages — see <a href="#" data-opentos="disputes" style="color:inherit;">how disputes work</a>.</div>
@@ -1044,32 +1048,13 @@ function renderProfile(){
       <p class="role">${p.trade} · ${p.experience} · travels up to ${p.radius}km</p>
       <div style="margin-bottom:8px;">${ratingLineHtml(p.name)}</div>
       <div class="tags">${p.skills.map(s=>`<span class="tag">${escapeHtml(s)}</span>`).join('')}</div>
-      <div class="tags" style="margin-top:8px;">${p.sample?`<span class="badge">Work sample attached</span>`:''}${p.premium?`<span class="badge" style="background:var(--premium-soft);color:var(--premium-ink);">Premium</span>`:''}</div>
+      <div class="tags" style="margin-top:8px;">${p.sample?`<span class="badge">Work sample attached</span>`:''}</div>
       ${!p.verified?`<button class="verifybtn" id="verifyLaterBtn" style="margin-top:12px;">🪪 Verify phone number & photo ID</button>`:''}
-      ${p.premium?`<div class="feebox" style="margin-top:12px;"><div><span>Platform fee on jobs</span><span>6% (was 10%)</span></div></div>`:''}
-    </div>
-
-    <div class="sub">Membership</div>
-    <div class="card">
-      <div class="card-top">
-        <div><p class="card-title">Premium</p><p class="card-sub">€7.99/mo or €59/yr</p></div>
-        <span class="badge ${p.premium?'':'muted'}">${p.premium?'Active':'Not active'}</span>
-      </div>
-      <div class="card-desc">Lower platform fee (6% instead of 10%), see new jobs 20 minutes before free members, and unlock your response-rate stats. Doesn't change your ranking or visibility on bids.</div>
-      <button class="btn ${p.premium?'ghost':'accent'}" id="togglePremium">${p.premium?'Cancel premium':'Go premium'}</button>
     </div>
 
     <div class="sub">My bids</div>
     <div id="myBidsList"></div>
   `;
-  document.getElementById('togglePremium').onclick=async ()=>{
-    const next=!state.tradeProfile.premium;
-    const { error } = await sb.from('profiles').update({premium: next}).eq('id', session.user.id);
-    if(error){ toast('Could not update membership.'); return; }
-    toast(next?'Premium activated.':'Premium cancelled.');
-    await loadMyProfile();
-    renderProfile();
-  };
   const verifyLaterBtn=document.getElementById('verifyLaterBtn');
   if(verifyLaterBtn){
     verifyLaterBtn.onclick=async ()=>{
@@ -1095,7 +1080,7 @@ function renderProfile(){
       let payHtml='';
       if(t.accepted===b.id){
         if(t.completed){
-          payHtml=`<div class="paybox released"><div class="paybox-top released-text">✓ €${feeBreakdown(b.price,b.premium).net} paid out</div></div>`;
+          payHtml=`<div class="paybox released"><div class="paybox-top released-text">✓ €${feeBreakdown(b.price).net} paid out</div></div>`;
         } else if(t.workerCompletedAt){
           payHtml=`<div class="paybox held"><div class="paybox-top held-text">⏳ Waiting on ${t.poster} to approve</div><div class="paybox-sub">Auto-releases in <span class="mono" data-countdown="${t.id}">calculating…</span> if they don't respond.</div></div>`;
         } else {
@@ -1213,7 +1198,7 @@ async function handleReturnFromStripe(){
   if(p.has('paycancel')){ state.tab='post'; toast('Payment cancelled — the bid wasn\'t accepted.'); return; }
   if(p.has('connect')){
     state.tab='profile';
-    try{ const r=await callFn('sync_connect_status'); toast(r.ready?'Payout account connected.':'Payout setup not finished yet — you can continue it in Settings.'); }
+    try{ const r=await callFn('sync_connect_status'); toast(r.paid?`Payout account connected — €${money(r.paidAmount)} from finished jobs is on its way to you.`:(r.ready?'Payout account connected.':'Payout setup not finished yet — you can continue it in Settings.')); }
     catch(e){ toast(e.message); }
     return;
   }

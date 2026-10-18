@@ -267,37 +267,92 @@ async function releaseTaskPayment(taskId: string, callerId: string | null, mode:
   const { data: bid } = await db.from("bids").select("*").eq("id", task.accepted_bid_id).single();
   const { data: payment } = await db.from("payments").select("*").eq("task_id", taskId).single();
   if (!payment) return json({ error: "No payment on file for this job." }, 400);
-  const { data: workerProfile } = await db.from("profiles").select("*").eq("id", bid.worker_id).single();
 
-  const captured = await stripe.paymentIntents.capture(payment.stripe_payment_intent_id);
-  const platformFeeCents = Math.round(Number(payment.platform_fee) * 100);
-  const payoutCents = captured.amount_received - platformFeeCents;
-
-  let transferId: string | null = null;
-  if (workerProfile?.stripe_connect_account_id) {
-    try {
-      const transfer = await stripe.transfers.create({
-        amount: payoutCents,
-        currency: "eur",
-        destination: workerProfile.stripe_connect_account_id,
-        source_transaction:
-          typeof captured.latest_charge === "string" ? captured.latest_charge : undefined,
-        metadata: { taskId },
-      });
-      transferId = transfer.id;
-    } catch (e) {
-      // Charge already succeeded; don't lose that state. Money stays in the
-      // platform balance and can be transferred manually.
-      console.error("transfer failed", taskId, e);
-    }
-  }
+  await stripe.paymentIntents.capture(payment.stripe_payment_intent_id);
 
   await db.from("payments").update({
     status: "released",
     released_at: new Date().toISOString(),
   }).eq("task_id", taskId);
   await db.from("tasks").update({ completed: true }).eq("id", taskId);
+
+  // Send the worker their share now if their payout account is ready.
+  // If it isn't, the money waits in OnCall's balance and is sent later by
+  // payPendingPayouts (when they finish payout setup, or on the next timer run).
+  let transferId: string | null = null;
+  try {
+    transferId = await payWorkerForTask(taskId, bid.worker_id);
+  } catch (e) {
+    console.error("transfer failed", taskId, e);
+  }
   return json({ ok: true, transferId });
+}
+
+// ---------- 4b. Send a worker their share of a released job ----------
+// Safe to call more than once for the same job: it skips jobs already paid,
+// and Stripe's idempotency key stops a double transfer if two calls race.
+async function isPayoutReady(accountId: string) {
+  const account = await stripe.accounts.retrieve(accountId);
+  return account.capabilities?.transfers === "active";
+}
+
+async function payWorkerForTask(taskId: string, workerId: string): Promise<string | null> {
+  const { data: payment } = await db.from("payments").select("*").eq("task_id", taskId).single();
+  if (!payment || payment.status !== "released") return null;
+  if (payment.payout_transfer_id) return payment.payout_transfer_id;
+
+  const { data: worker } = await db.from("profiles").select("stripe_connect_account_id").eq("id", workerId).single();
+  const accountId = worker?.stripe_connect_account_id;
+  if (!accountId || !(await isPayoutReady(accountId))) return null;
+
+  const pi = await stripe.paymentIntents.retrieve(payment.stripe_payment_intent_id);
+  if (pi.status !== "succeeded") return null;
+  const payoutCents = pi.amount_received - Math.round(Number(payment.platform_fee) * 100);
+  if (payoutCents <= 0) return null;
+
+  const transfer = await stripe.transfers.create({
+    amount: payoutCents,
+    currency: "eur",
+    destination: accountId,
+    source_transaction: typeof pi.latest_charge === "string" ? pi.latest_charge : pi.latest_charge?.id,
+    metadata: { taskId, workerId },
+  }, { idempotencyKey: `oncall-payout-${taskId}` });
+
+  await db.from("payments").update({
+    payout_transfer_id: transfer.id,
+    paid_out_at: new Date().toISOString(),
+  }).eq("task_id", taskId);
+  return transfer.id;
+}
+
+// Pays every released job whose worker hasn't been paid yet (optionally for one worker only).
+async function payPendingPayouts(onlyWorkerId?: string) {
+  const { data: pending } = await db
+    .from("payments")
+    .select("task_id")
+    .eq("status", "released")
+    .is("payout_transfer_id", null);
+
+  let paid = 0;
+  let paidCents = 0;
+  for (const p of pending ?? []) {
+    const { data: task } = await db.from("tasks").select("accepted_bid_id").eq("id", p.task_id).single();
+    if (!task?.accepted_bid_id) continue;
+    const { data: bid } = await db.from("bids").select("worker_id").eq("id", task.accepted_bid_id).single();
+    const workerId = bid?.worker_id;
+    if (!workerId || (onlyWorkerId && workerId !== onlyWorkerId)) continue;
+    try {
+      const transferId = await payWorkerForTask(p.task_id, workerId);
+      if (transferId) {
+        paid++;
+        const t = await stripe.transfers.retrieve(transferId);
+        paidCents += t.amount;
+      }
+    } catch (e) {
+      console.error("pending payout failed", p.task_id, e);
+    }
+  }
+  return { paid, paidAmount: paidCents / 100 };
 }
 
 // ---------- 5. Dispute — stops auto-release, flags for manual review ----------
@@ -373,7 +428,12 @@ async function syncConnectStatus(caller: any) {
   if (!profile?.stripe_connect_account_id) return json({ ready: false });
   const account = await stripe.accounts.retrieve(profile.stripe_connect_account_id);
   const ready = !!account.payouts_enabled && !!account.charges_enabled;
-  return json({ ready, payoutsEnabled: account.payouts_enabled, chargesEnabled: account.charges_enabled });
+  // Now that the account works, send any job money that was waiting for it.
+  let backPay = { paid: 0, paidAmount: 0 };
+  if (account.capabilities?.transfers === "active") {
+    backPay = await payPendingPayouts(caller.id);
+  }
+  return json({ ready, payoutsEnabled: account.payouts_enabled, chargesEnabled: account.charges_enabled, ...backPay });
 }
 
 // ---------- 8a. Reminder email to the poster ~4 hours before auto-release ----------
@@ -458,5 +518,9 @@ async function autoReleaseSweep() {
       results.push({ taskId: t.id, error: e instanceof Error ? e.message : String(e) });
     }
   }
-  return json({ swept: results.length, results, remindersSent });
+  // Catch-up: pay workers who finished payout setup after their job was released.
+  let pendingPayouts = { paid: 0, paidAmount: 0 };
+  try { pendingPayouts = await payPendingPayouts(); } catch (e) { console.error("pending payouts", e); }
+
+  return json({ swept: results.length, results, remindersSent, pendingPayouts });
 }
