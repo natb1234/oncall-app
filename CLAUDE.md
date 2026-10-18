@@ -41,14 +41,14 @@ One-off €1.99 per job (any poster, open jobs only): `create_boost_checkout` �
 ## Status (as of 18 Oct 2026, evening)
 - Deployed function version 11 (Boost; Premium subscription; pending-payout catch-up, retried every timer run with a 10-minute idempotency window so a failed attempt isn't stuck for 24h, and checks Stripe for an existing transfer before paying; worker Connect accounts prefilled as Irish individuals so they skip company questions — unfinished accounts without the `oncall_prefill` metadata tag are replaced). Stripe sandbox needed "Accounts v1 support" switched on (Settings → API policies) for Connect account creation; consider moving to Accounts v2 before live. `premium` is not client-writable. Poster now sees the "job done" photo after payout and during a dispute.
 
-Tested end to end in the user's hands: signup/login, profile, post job with photo, bid, messaging, accept + pay with test card 4242…, mark done with photo, approve & release, rating, reminder email, worker payout onboarding (Connect), and automatic payout to the worker on approval ("Moving furniture" €40 → €36 transferred 2 s after approval, 18 Oct). The earlier stuck €54 was also paid.
+Tested end to end in the user's hands: signup/login, profile, post job with photo, bid, messaging, accept + pay with test card 4242…, mark done with photo, approve & release, rating, reminder email, worker payout onboarding (Connect), and automatic payout to the worker on approval ("Moving furniture" €40 → €36 transferred 2 s after approval, 18 Oct). The earlier stuck €54 was also paid. Premium subscription (Nay, €4.99, renews 18 Nov), Boost ("Dog walking", €1.99 → Featured 48h) and the 6% Premium fee (€30 job → €1.80 fee → €28.20 transferred to Nay) all tested 18 Oct.
 
 Test accounts: `natbooth252@gmail.com` (poster) and `natbooth252+worker@gmail.com` (worker, name "Nay").
 
 ## To-do, most important first
 1. **Domain** for Resend so reminder emails reach real users; then set `EMAIL_FROM`.
 2. Leftovers to clean up — deletes from chat time out (Supabase holds them for a confirmation), so do it in the dashboard: test task "TEST reminder email (ignore)" (id `da8911db-…`, nothing references it), table `public.site_pages`, Storage bucket `site` (holds one old `oncall-mvp.html`).
-3. **Test Premium & Boost** with card 4242: Profile → Go Premium → pay → badge shows; as a Premium poster, a new job shows Featured on Home; win a job and check the fee is 6%; Cancel Premium shows "Ends on …". As a non-Premium poster, My jobs → Boost this job → pay → job is Featured.
+3. Optional checks: as a Premium poster (Nay), post a job and confirm it's Featured on Home; Cancel Premium shows "Ends on …" and "Keep Premium" undoes it.
 4. Before launch: switch Stripe to live keys, solicitor-reviewed terms, ID verification is currently a fake toggle (`verified` set by the client).
 
 ## How to ship changes
