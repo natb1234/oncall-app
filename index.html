@@ -109,6 +109,7 @@
   .mediaremove{position:absolute;top:8px;right:8px;background:rgba(28,28,30,0.75);color:#fff;border:none;border-radius:50%;width:26px;height:26px;font-size:13px;cursor:pointer;}
   .videobadge{position:absolute;z-index:2;bottom:8px;left:8px;background:rgba(28,28,30,0.75);color:#fff;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;padding:3px 7px;border-radius:20px;}
 
+  .premiumbadge{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;color:var(--premium-ink);background:var(--premium-soft);padding:3px 8px;border-radius:20px;}
   .verified{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;color:var(--accent-ink);background:var(--accent-soft);padding:3px 8px;border-radius:20px;}
   .verifybtn{border:1.5px dashed var(--border);border-radius:var(--radius-sm);padding:14px;text-align:center;font-size:13px;font-weight:500;cursor:pointer;background:var(--surface);color:var(--ink-soft);}
   .verifybtn.done{border-style:solid;border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink);font-weight:600;}
@@ -269,8 +270,8 @@
 <div class="overlay" id="settingsOverlay">
   <div class="modal" style="border-radius:20px;">
     <div class="modal-head"><h3>Settings</h3><button class="modal-close" id="settingsClose">✕</button></div>
-    <div class="modal-body">
-      <div class="sub" style="margin-top:0;">Notifications</div>
+    <div class="modal-body" style="padding:0;">
+      <div class="sub">Notifications</div>
       <div class="toggle-row">
         <span>Push notifications</span>
         <label class="switch"><input type="checkbox" id="setPush"><span class="slider"></span></label>
@@ -305,7 +306,7 @@
       <div class="sub">Account</div>
       <button class="msgbtn" style="width:100%;color:#B3261E;" id="setLogoutBtn">Log out</button>
 
-      <div class="hint" style="margin-top:18px;">OnCall MVP Prototype — these settings are for demo purposes only.</div>
+      <div class="hint" style="margin-top:18px;">OnCall MVP Prototype — notification switches are for demo purposes only.</div>
     </div>
   </div>
 </div>
@@ -397,7 +398,7 @@ function setSavedIds(ids){
 // tasks has TWO relationships to bids (bids.task_id -> tasks, and
 // tasks.accepted_bid_id -> bids), so without the hint PostgREST can't tell
 // which direction we mean.
-const TASK_SELECT = '*, poster:profiles!tasks_poster_id_fkey(id,name), bids!bids_task_id_fkey(*, worker:profiles!bids_worker_id_fkey(id,name,verified))';
+const TASK_SELECT = '*, poster:profiles!tasks_poster_id_fkey(id,name), bids!bids_task_id_fkey(*, worker:profiles!bids_worker_id_fkey(id,name,verified,premium))';
 const BID_SELECT = '*, task:tasks!bids_task_id_fkey(id,title,location,poster_id,accepted_bid_id,completed,worker_completed_at,auto_release_at,disputed,rated, poster:profiles!tasks_poster_id_fkey(id,name))';
 
 function mapTaskRow(row){
@@ -417,7 +418,7 @@ function mapTaskRow(row){
       name: escapeHtml(b.worker && b.worker.name || 'Someone'),
       price: `€${b.price}`,
       note: escapeHtml(b.note || 'Available to start soon.'),
-      premium: !!b.premium, verified: !!(b.worker && b.worker.verified),
+      premium: !!(b.worker && b.worker.premium), verified: !!(b.worker && b.worker.verified),
     })),
     accepted: row.accepted_bid_id,
     completed: row.completed,
@@ -436,7 +437,7 @@ function mapProfileRow(row){
     id: row.id, name: escapeHtml(row.name), trade: escapeHtml(row.trade||''),
     experience: escapeHtml(row.experience||'—'), skills: row.skills||[],
     sample: !!row.has_sample, verified: !!row.verified,
-    radius: row.radius_km||15, premium: !!row.premium,
+    radius: row.radius_km||15, premium: !!row.premium, premiumUntil: row.premium_until ? new Date(row.premium_until) : null,
   };
 }
 
@@ -452,19 +453,26 @@ async function loadHomeTasks(){
 async function loadMyPostedTasks(){
   const { data, error } = await sb.from('tasks').select(TASK_SELECT).eq('poster_id', session.user.id).order('created_at',{ascending:false});
   state.myPostedTasks = error ? [] : (data||[]).map(mapTaskRow);
+  // The fee actually charged on accepted jobs (6% or 10%, fixed when the bid was accepted).
+  const acceptedIds=state.myPostedTasks.filter(t=>t.accepted).map(t=>t.id);
+  if(acceptedIds.length){
+    const { data: pays } = await sb.from('payments').select('task_id,platform_fee').in('task_id', acceptedIds);
+    const fees=new Map((pays||[]).map(p=>[p.task_id, Number(p.platform_fee)]));
+    state.myPostedTasks.forEach(t=>{ if(fees.has(t.id)) t.platformFee=fees.get(t.id); });
+  }
 }
 async function loadMyBids(){
   const { data, error } = await sb.from('bids').select(BID_SELECT).eq('worker_id', session.user.id).order('created_at',{ascending:false});
   if(error){ state.myBids=[]; return; }
-  // Which of my finished jobs has the money actually been sent for?
-  const doneIds=(data||[]).filter(r=>r.task.completed && r.task.accepted_bid_id===r.id).map(r=>r.task.id);
-  const paidOut=new Set();
-  if(doneIds.length){
-    const { data: pays } = await sb.from('payments').select('task_id,payout_transfer_id').in('task_id', doneIds);
-    (pays||[]).forEach(p=>{ if(p.payout_transfer_id) paidOut.add(p.task_id); });
+  // For jobs I won: the fee charged, and whether the money has actually been sent.
+  const wonIds=(data||[]).filter(r=>r.task.accepted_bid_id===r.id).map(r=>r.task.id);
+  const paidOut=new Set(), fees=new Map();
+  if(wonIds.length){
+    const { data: pays } = await sb.from('payments').select('task_id,payout_transfer_id,platform_fee').in('task_id', wonIds);
+    (pays||[]).forEach(p=>{ if(p.payout_transfer_id) paidOut.add(p.task_id); fees.set(p.task_id, Number(p.platform_fee)); });
   }
   state.myBids = (data||[]).map(row=>({
-    bid: { id: row.id, price: `€${row.price}`, premium: !!row.premium },
+    bid: { id: row.id, price: `€${row.price}`, platformFee: fees.has(row.task.id) ? fees.get(row.task.id) : null },
     task: {
       id: row.task.id, title: escapeHtml(row.task.title), location: escapeHtml(row.task.location||'—'),
       posterId: row.task.poster_id, poster: escapeHtml(row.task.poster && row.task.poster.name || 'Someone'),
@@ -523,13 +531,14 @@ function toast(m){
   clearTimeout(window.__tt); window.__tt=setTimeout(()=>t.classList.remove('show'), Math.min(8000, 1900+String(m).length*40));
 }
 
-// Must match PLATFORM_FEE_PERCENT in the oncall Edge Function (the server decides the real fee).
-const PLATFORM_FEE_RATE=0.10;
+// Must match the Edge Function (the server decides the real fee when a bid is accepted).
+const PLATFORM_FEE_RATE=0.10, PREMIUM_FEE_RATE=0.06, PREMIUM_PRICE='€4.99';
 function money(n){ return Number.isInteger(n) ? String(n) : n.toFixed(2); }
-function feeBreakdown(priceStr){
+// knownFee: euros actually charged (from payments), if the bid was accepted. Otherwise estimate.
+function feeBreakdown(priceStr, knownFee, premium){
   const cents=Math.round((parseFloat(String(priceStr).replace(/[^0-9.]/g,''))||0)*100);
-  const feeCents=Math.round(cents*PLATFORM_FEE_RATE);
-  return {num:money(cents/100), fee:money(feeCents/100), net:money((cents-feeCents)/100), rate:PLATFORM_FEE_RATE};
+  const feeCents=(knownFee!=null) ? Math.round(knownFee*100) : Math.round(cents*(premium?PREMIUM_FEE_RATE:PLATFORM_FEE_RATE));
+  return {num:money(cents/100), fee:money(feeCents/100), net:money((cents-feeCents)/100), rate: cents ? feeCents/cents : 0};
 }
 
 async function loadReviews(){
@@ -555,6 +564,9 @@ function ratingLineHtml(name){
 }
 function verifiedBadgeHtml(isVerified){
   return isVerified ? `<span class="verified">✓ Verified</span>` : '';
+}
+function premiumBadgeHtml(isPremium){
+  return isPremium ? `<span class="premiumbadge">★ Premium</span>` : '';
 }
 function guaranteeBanner(){
   return `<div class="guarantee"><span class="gicon">🛡️</span><span class="gtext"><strong>OnCall Guarantee</strong> — jobs under €150 are covered if something goes seriously wrong. Full terms coming soon.</span></div>`;
@@ -849,14 +861,14 @@ function renderPostedList(mineList, mine){
       `:''}
       ${acc?`
         <div class="feebox">
-          <div><span>Accepted bid — ${acc.name}</span><span>${acc.price}</span></div>
-          <div><span>Platform fee (${Math.round(feeBreakdown(acc.price).rate*100)}%)</span><span>-€${feeBreakdown(acc.price).fee}</span></div>
-          <div><span><strong>Tradesperson receives</strong></span><span><strong>€${feeBreakdown(acc.price).net}</strong></span></div>
+          <div><span>Accepted bid — ${acc.name}${acc.premium?' (Premium)':''}</span><span>${acc.price}</span></div>
+          <div><span>Platform fee (${Math.round(feeBreakdown(acc.price,t.platformFee,acc.premium).rate*100)}%)</span><span>-€${feeBreakdown(acc.price,t.platformFee,acc.premium).fee}</span></div>
+          <div><span><strong>Tradesperson receives</strong></span><span><strong>€${feeBreakdown(acc.price,t.platformFee,acc.premium).net}</strong></span></div>
         </div>
         ${t.completed?`
           ${t.completionPhoto?`<div class="mediapreview" style="margin:10px 0;"><img src="${t.completionPhoto.url}" alt="Completed job" style="max-height:140px;"></div>`:''}
           <div class="paybox released">
-            <div class="paybox-top released-text">✓ €${feeBreakdown(acc.price).net} released to ${acc.name}</div>
+            <div class="paybox-top released-text">✓ €${feeBreakdown(acc.price,t.platformFee,acc.premium).net} released to ${acc.name}</div>
             <div class="paybox-sub">${t.disputed?'Resolved — paid out through OnCall.':(t.autoReleased?'Auto-released after no response — paid out through OnCall.':'Job complete — paid out through OnCall.')}</div>
           </div>
           ${!t.rated?`<button class="msgbtn" style="margin-top:10px;" data-raterelease="${t.id}">Rate ${acc.name}</button>`:''}
@@ -893,7 +905,7 @@ function renderPostedList(mineList, mine){
           t.bids.map(b=>`
             <div class="bidrow">
               <div>
-                <div class="bidname">${b.name} ${verifiedBadgeHtml(b.verified)}</div>
+                <div class="bidname">${b.name} ${verifiedBadgeHtml(b.verified)} ${premiumBadgeHtml(b.premium)}</div>
                 <div style="margin:2px 0;">${ratingLineHtml(b.name)}</div>
                 <div class="bidnote">${b.note}</div>
               </div>
@@ -1014,7 +1026,9 @@ function renderProfile(){
         <div class="hint">Jobs outside this range won't show up on Home.</div>
       </div>
       <button class="btn accent" id="createTrade">Create profile</button>
+      <div id="profileSettings"></div>
     `;
+    mountSettings(document.getElementById('profileSettings'));
     document.getElementById('rRadius').oninput=e=>{document.getElementById('radiusVal').textContent=e.target.value+'km';};
     let isVerified=false;
     document.getElementById('verifyBtn').onclick=e=>{
@@ -1073,11 +1087,27 @@ function renderProfile(){
       <p class="role">${p.trade} · ${p.experience} · travels up to ${p.radius}km</p>
       <div style="margin-bottom:8px;">${ratingLineHtml(p.name)}</div>
       <div class="tags">${p.skills.map(s=>`<span class="tag">${escapeHtml(s)}</span>`).join('')}</div>
-      <div class="tags" style="margin-top:8px;">${p.sample?`<span class="badge">Work sample attached</span>`:''}</div>
+      <div class="tags" style="margin-top:8px;">${p.sample?`<span class="badge">Work sample attached</span>`:''}${premiumBadgeHtml(p.premium)}</div>
       ${!p.verified?`<button class="verifybtn" id="verifyLaterBtn" style="margin-top:12px;">🪪 Verify phone number & photo ID</button>`:''}
     </div>
 
+    <div class="sub">OnCall Premium</div>
+    <div class="card" id="premiumCard"></div>
+
+    <div id="profileSettings"></div>
   `;
+  renderPremiumCard();
+  mountSettings(document.getElementById('profileSettings'));
+  // Refresh from Stripe in the background (renewal date, cancelled, lapsed) — at most once a minute.
+  if(!state.premiumSyncedAt || Date.now()-state.premiumSyncedAt>60000){
+    state.premiumSyncedAt=Date.now();
+    callFn('sync_premium').then(r=>{
+      state.premiumStatus=r;
+      const changed=state.tradeProfile && state.tradeProfile.premium!==r.active;
+      if(state.tradeProfile){ state.tradeProfile.premium=r.active; state.tradeProfile.premiumUntil=r.premiumUntil?new Date(r.premiumUntil):null; }
+      if(state.tab==='profile') (changed ? renderProfile() : renderPremiumCard());
+    }).catch(()=>{});
+  }
   const verifyLaterBtn=document.getElementById('verifyLaterBtn');
   if(verifyLaterBtn){
     verifyLaterBtn.onclick=async ()=>{
@@ -1107,8 +1137,8 @@ function renderBidsList(myBidsList, myBids){
       if(t.accepted===b.id){
         if(t.completed){
           payHtml = t.paidOut
-            ? `<div class="paybox released"><div class="paybox-top released-text">✓ €${feeBreakdown(b.price).net} paid out</div></div>`
-            : `<div class="paybox held"><div class="paybox-top held-text">⏳ €${feeBreakdown(b.price).net} on its way</div><div class="paybox-sub">Approved. It's sent to your bank once your payout account is set up — check Settings → Getting paid. We retry every 15 minutes.</div></div>`;
+            ? `<div class="paybox released"><div class="paybox-top released-text">✓ €${feeBreakdown(b.price,b.platformFee).net} paid out</div></div>`
+            : `<div class="paybox held"><div class="paybox-top held-text">⏳ €${feeBreakdown(b.price,b.platformFee).net} on its way</div><div class="paybox-sub">Approved. It's sent to your bank once your payout account is set up — check Profile → Getting paid. We retry every 15 minutes.</div></div>`;
         } else if(t.workerCompletedAt){
           payHtml=`<div class="paybox held"><div class="paybox-top held-text">⏳ Waiting on ${t.poster} to approve</div><div class="paybox-sub">Auto-releases in <span class="mono" data-countdown="${t.id}">calculating…</span> if they don't respond.</div></div>`;
         } else {
@@ -1221,12 +1251,22 @@ async function acceptBidFlow(taskId, bidId, btn){
 // Runs once after Stripe sends the person back to the app.
 async function handleReturnFromStripe(){
   const p=new URLSearchParams(location.search);
-  if(!p.has('paid') && !p.has('paycancel') && !p.has('connect')) return;
+  if(!p.has('paid') && !p.has('paycancel') && !p.has('connect') && !p.has('premium') && !p.has('premiumcancel')) return;
   history.replaceState(null,'',appBaseUrl());
   if(p.has('paycancel')){ state.tab='jobs'; state.jobsView='posted'; toast('Payment cancelled — the bid wasn\'t accepted.'); return; }
+  if(p.has('premiumcancel')){ state.tab='profile'; toast('No problem — you haven\'t been charged.'); return; }
+  if(p.has('premium')){
+    state.tab='profile';
+    try{
+      const r=await callFn('sync_premium'); state.premiumStatus=r; state.premiumSyncedAt=Date.now();
+      await loadMyProfile();
+      toast(r.active?'Welcome to Premium! Your fee is now 6% on jobs you win.':'Payment is still processing — check back in a minute.');
+    }catch(e){ toast(e.message); }
+    return;
+  }
   if(p.has('connect')){
     state.tab='profile';
-    try{ const r=await callFn('sync_connect_status'); toast(r.paid?`Payout account connected — €${money(r.paidAmount)} from finished jobs is on its way to you.`:(r.ready?'Payout account connected.':'Payout setup not finished yet — you can continue it in Settings.')); }
+    try{ const r=await callFn('sync_connect_status'); toast(r.paid?`Payout account connected — €${money(r.paidAmount)} from finished jobs is on its way to you.`:(r.ready?'Payout account connected.':'Payout setup not finished yet — you can continue it on your Profile page.')); }
     catch(e){ toast(e.message); }
     return;
   }
@@ -1285,18 +1325,67 @@ function tickAutoRelease(){
 }
 setInterval(tickAutoRelease, 1000);
 
+// ---------- Premium card (Profile page) ----------
+function fmtDate(d){ return d ? new Date(d).toLocaleDateString('en-IE',{day:'numeric',month:'short'}) : ''; }
+function renderPremiumCard(){
+  const card=document.getElementById('premiumCard');
+  if(!card || !state.tradeProfile) return;
+  const st=state.premiumStatus;
+  const active = st ? st.active : state.tradeProfile.premium;
+  const until = (st && st.premiumUntil) || state.tradeProfile.premiumUntil;
+  const cancelling = !!(st && st.cancelling);
+  card.innerHTML=`
+    <div class="card-top">
+      <div><p class="card-title">★ Premium</p><p class="card-sub">${PREMIUM_PRICE}/month · cancel anytime</p></div>
+      <span class="badge ${active?'':'muted'}">${active?(cancelling?'Ending':'Active'):'Not active'}</span>
+    </div>
+    <div class="card-desc">
+      • Pay a <strong>6% fee</strong> instead of 10% on jobs you win<br>
+      • A <strong>Premium badge</strong> next to your name on every bid
+    </div>
+    ${active ? `<div class="hint" style="margin:-4px 0 10px;">${cancelling?`Premium ends on ${fmtDate(until)}. You won't be charged again.`:`Renews on ${fmtDate(until)}.`} The fee on a job is set when your bid is accepted.</div>` : ''}
+    <button class="btn ${active?'ghost':'accent'}" id="premiumBtn">${active?(cancelling?'Keep Premium':'Cancel Premium'):'Go Premium — '+PREMIUM_PRICE+'/month'}</button>
+  `;
+  document.getElementById('premiumBtn').onclick=async (e)=>{
+    const btn=e.currentTarget;
+    try{
+      if(!active){
+        btn.disabled=true; btn.textContent='Opening…';
+        const { url } = await callFn('create_premium_checkout',{ returnUrl: appBaseUrl() });
+        window.location.href=url; return;
+      }
+      if(!cancelling && !confirm(`Cancel Premium? You keep it until ${fmtDate(until)}, then it stops and you won't be charged again.`)) return;
+      btn.disabled=true;
+      state.premiumStatus=await callFn('set_premium_renewal',{ renew: cancelling });
+      toast(cancelling?'Premium will keep renewing.':`Cancelled — Premium stays on until ${fmtDate(until)}.`);
+      renderPremiumCard();
+    }catch(err){ toast(err.message); btn.disabled=false; renderPremiumCard(); }
+  };
+}
+
 // ---------- settings & legal ----------
-function openSettings(){
-  document.getElementById('setPush').checked = state.settings.pushNotif;
-  document.getElementById('setEmail').checked = state.settings.emailNotif;
-  document.querySelectorAll('#setAutoReleaseSeg .segbtn').forEach(b=>{
-    b.classList.toggle('active', parseInt(b.dataset.hours,10)===state.settings.autoReleaseHours);
-  });
-  document.getElementById('settingsOverlay').classList.add('show');
+// The Settings content (payouts, legal, log out) lives at the bottom of the
+// Profile page. The same elements are moved there, so their buttons keep working.
+const settingsBody=document.querySelector('#settingsOverlay .modal-body');
+function mountSettings(container){
+  if(!container) return;
+  container.appendChild(settingsBody);
+  // Look up inside settingsBody: it may be detached from the page while the Profile redraws.
+  settingsBody.querySelector('#setPush').checked = state.settings.pushNotif;
+  settingsBody.querySelector('#setEmail').checked = state.settings.emailNotif;
   callFn('sync_connect_status').then(r=>{
-    document.getElementById('setPayoutStatus').textContent = r.ready ? '✓ Payout account connected.' : 'Connect a payout account so job money reaches you.';
-    document.getElementById('setPayoutBtn').textContent = r.ready ? 'Update' : 'Set up';
+    settingsBody.querySelector('#setPayoutStatus').textContent = r.ready ? '✓ Payout account connected.' : 'Connect a payout account so job money reaches you.';
+    settingsBody.querySelector('#setPayoutBtn').textContent = r.ready ? 'Update' : 'Set up';
   }).catch(()=>{});
+}
+// The ⚙️ button jumps to those settings on the Profile page.
+function openSettings(){
+  if(state.tab!=='profile'){ state.tab='profile'; renderCurrentTab().then(scrollToSettings); }
+  else scrollToSettings();
+}
+function scrollToSettings(){
+  const el=document.getElementById('profileSettings');
+  if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
 }
 function closeSettings(){
   document.getElementById('settingsOverlay').classList.remove('show');
@@ -1334,6 +1423,9 @@ function openToS(section){
 
     <div class="sub">Payments & escrow</div>
     <p>When a bid is accepted, the poster's card is charged straight away and the money is held by OnCall — not paid to the worker yet.</p>
+
+    <div class="sub">Fees & Premium</div>
+    <p>OnCall keeps a <strong>10% fee</strong> from the price of each job; the worker receives the rest. Workers with <strong>OnCall Premium</strong> (${PREMIUM_PRICE} a month, cancel anytime) pay a <strong>6% fee</strong> instead. The fee is fixed at the moment a bid is accepted. Cancelling Premium stops future charges; you keep Premium until the end of the month you've paid for. No refunds for part months.</p>
 
     <div class="sub">1. Photo evidence before payout</div>
     <p>A worker must mark the job done <strong>with a photo</strong> of the finished work before any payment is released. No photo, no payout — this protects both sides if something's disputed later.</p>

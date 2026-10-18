@@ -10,7 +10,9 @@
 import Stripe from "npm:stripe@^17.0.0";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
-const PLATFORM_FEE_PERCENT = 10; // OnCall's cut. Change this one number to adjust it everywhere.
+const PLATFORM_FEE_PERCENT = 10;         // OnCall's cut on a job.
+const PREMIUM_PLATFORM_FEE_PERCENT = 6;  // Cut when the winning worker has Premium at the moment the bid is accepted.
+const PREMIUM_PRICE_CENTS = 499;         // Premium: €4.99 a month.
 const AUTO_RELEASE_HOURS = 24;   // Poster's window to approve or report a problem. Server-controlled only.
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!);
@@ -89,6 +91,12 @@ Deno.serve(async (req: Request) => {
         return await connectOnboardingLink(caller, body);
       case "sync_connect_status":
         return await syncConnectStatus(caller);
+      case "create_premium_checkout":
+        return await createPremiumCheckout(caller, body);
+      case "sync_premium":
+        return json(await syncPremium(caller.id));
+      case "set_premium_renewal":
+        return await setPremiumRenewal(caller, body);
       default:
         return json({ error: "Unknown action." }, 400);
     }
@@ -211,7 +219,11 @@ async function finalizeAcceptBid(caller: any, body: any) {
   }
 
   await db.from("tasks").update({ accepted_bid_id: bidId }).eq("id", taskId);
-  const platformFeeCents = Math.round(pi.amount * (PLATFORM_FEE_PERCENT / 100));
+  // The fee is fixed now, from the worker's Premium status at this moment.
+  let workerPremium = false;
+  try { workerPremium = (await syncPremium(bid.worker_id)).active; } catch (e) { console.error("premium check", e); }
+  const feePercent = workerPremium ? PREMIUM_PLATFORM_FEE_PERCENT : PLATFORM_FEE_PERCENT;
+  const platformFeeCents = Math.round(pi.amount * (feePercent / 100));
   await db.from("payments").insert({
     task_id: taskId,
     stripe_payment_intent_id: paymentIntentId,
@@ -471,6 +483,61 @@ async function syncConnectStatus(caller: any) {
   return json({ ready, payoutsEnabled: account.payouts_enabled, chargesEnabled: account.charges_enabled, ...backPay });
 }
 
+// ---------- 7b. Premium subscription (€4.99/month) ----------
+// Stripe is the source of truth. profiles.premium / premium_until are a copy for
+// the app (badge, Profile page), refreshed on every check below.
+async function findPremiumSubscription(customerId: string) {
+  const subs = await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 20 });
+  return subs.data.find((s) => s.metadata?.oncall === "premium" && ["active", "trialing"].includes(s.status)) ?? null;
+}
+
+async function syncPremium(userId: string) {
+  const { data: profile } = await db.from("profiles").select("stripe_customer_id, premium").eq("id", userId).single();
+  let sub: any = null;
+  if (profile?.stripe_customer_id) sub = await findPremiumSubscription(profile.stripe_customer_id);
+  const periodEnd = sub ? (sub.current_period_end ?? sub.items?.data?.[0]?.current_period_end ?? null) : null;
+  const premiumUntil = periodEnd ? new Date(periodEnd * 1000).toISOString() : null;
+  await db.from("profiles").update({ premium: !!sub, premium_until: premiumUntil }).eq("id", userId);
+  return { active: !!sub, premiumUntil, cancelling: !!sub?.cancel_at_period_end };
+}
+
+async function createPremiumCheckout(caller: any, body: any) {
+  const { returnUrl } = body;
+  if (typeof returnUrl !== "string" || !returnUrl.startsWith(ALLOWED_RETURN_PREFIX)) {
+    return json({ error: "Invalid return address." }, 400);
+  }
+  if ((await syncPremium(caller.id)).active) return json({ error: "You already have Premium." }, 400);
+  const customerId = await getOrCreateCustomer(caller);
+  const base = returnUrl.split("?")[0].split("#")[0];
+  const checkout = await stripe.checkout.sessions.create({
+    mode: "subscription",
+    customer: customerId,
+    line_items: [{
+      quantity: 1,
+      price_data: {
+        currency: "eur",
+        unit_amount: PREMIUM_PRICE_CENTS,
+        recurring: { interval: "month" },
+        product_data: { name: "OnCall Premium" },
+      },
+    }],
+    subscription_data: { metadata: { oncall: "premium", supabase_user_id: caller.id } },
+    success_url: `${base}?premium=1`,
+    cancel_url: `${base}?premiumcancel=1`,
+  });
+  return json({ url: checkout.url });
+}
+
+// Cancel at the end of the paid month, or undo that before it ends.
+async function setPremiumRenewal(caller: any, body: any) {
+  const renew = body.renew === true;
+  const { data: profile } = await db.from("profiles").select("stripe_customer_id").eq("id", caller.id).single();
+  const sub = profile?.stripe_customer_id ? await findPremiumSubscription(profile.stripe_customer_id) : null;
+  if (!sub) return json({ error: "You don't have Premium." }, 400);
+  await stripe.subscriptions.update(sub.id, { cancel_at_period_end: !renew });
+  return json(await syncPremium(caller.id));
+}
+
 // ---------- 8a. Reminder email to the poster ~4 hours before auto-release ----------
 const REMINDER_HOURS_BEFORE = 4;
 const APP_URL = "https://natb1234.github.io/oncall-app/";
@@ -553,6 +620,13 @@ async function autoReleaseSweep() {
       results.push({ taskId: t.id, error: e instanceof Error ? e.message : String(e) });
     }
   }
+  // Premium whose paid month has ended: re-check with Stripe (renewed or lapsed).
+  try {
+    const { data: lapsed } = await db.from("profiles").select("id")
+      .eq("premium", true).or(`premium_until.is.null,premium_until.lt.${new Date().toISOString()}`);
+    for (const p of lapsed ?? []) await syncPremium(p.id);
+  } catch (e) { console.error("premium resync", e); }
+
   // Catch-up: pay workers who finished payout setup after their job was released.
   let pendingPayouts = { paid: 0, paidAmount: 0 };
   try { pendingPayouts = await payPendingPayouts(); } catch (e) { console.error("pending payouts", e); }

@@ -13,3 +13,8 @@ alter table public.payments add column if not exists paid_out_at timestamptz;
 -- Stop the app (or anyone with the public key) from switching it on for free.
 revoke update (premium) on public.profiles from authenticated;
 update public.profiles set premium = false where premium;
+
+-- ---------- Premium subscription (18 Oct 2026, migration name: premium_subscription) ----------
+-- Premium is now a real €4.99/month Stripe subscription. Only the Edge Function
+-- sets premium / premium_until (from Stripe); clients still can't write them.
+alter table public.profiles add column if not exists premium_until timestamptz;

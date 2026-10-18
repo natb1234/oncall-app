@@ -8,7 +8,7 @@ Read this first. It explains the whole project so you can continue without the e
 - Never ask them to paste secret keys (Stripe `sk_...`, Supabase service_role, Resend `re_...`) into chat. Secrets go into the Supabase dashboard (Edge Functions → Secrets).
 
 ## What OnCall is
-A small same-day task marketplace (Ireland, EUR). Posters post small jobs, workers bid, poster accepts a bid and pays into escrow, worker marks done with a photo, poster approves (or it auto-releases after 24h), poster rates the worker. OnCall keeps a 10% platform fee.
+A small same-day task marketplace (Ireland, EUR). Posters post small jobs, workers bid, poster accepts a bid and pays into escrow, worker marks done with a photo, poster approves (or it auto-releases after 24h), poster rates the worker. OnCall keeps a 10% platform fee (6% if the worker has Premium when the bid is accepted).
 
 ## Where everything lives
 - **App (frontend):** single file `index.html` (identical copy `oncall-mvp.html`) in this repo, served by GitHub Pages:
@@ -24,13 +24,16 @@ A small same-day task marketplace (Ireland, EUR). Posters post small jobs, worke
 On release the server captures the payment and, if the worker's Stripe Connect account has `transfers` active, transfers amount minus 10% (recorded in `payments.payout_transfer_id` / `paid_out_at`). If not, the money waits in the platform balance; it's sent automatically when the worker finishes "Getting paid" setup (`sync_connect_status`) or on the next 15-min timer run. Stripe idempotency key `oncall-payout-<taskId>` prevents double payment.
 
 ## App layout
-Bottom tabs: Home (job feed), Saved, Post (form only), **My jobs** (switch between Posted — your jobs with bids, accept/pay, approve, rate — and Bidding — your bids, mark done, payout status), Inbox, Profile. Returning from Stripe Checkout lands on My jobs → Posted.
+Bottom tabs: Home (job feed), Saved, Post (form only), **My jobs** (switch between Posted — your jobs with bids, accept/pay, approve, rate — and Bidding — your bids, mark done, payout status), Inbox, Profile (profile card, Premium card, then everything that used to be in Settings: notifications (demo), payout setup, Terms, Privacy, Log out — the ⚙️ button scrolls there). Returning from Stripe Checkout lands on My jobs → Posted; from Premium checkout, on Profile.
+
+## Premium
+Real Stripe subscription, €4.99/month (Checkout `mode: subscription`, inline price, subscription metadata `oncall=premium`). Perks: 6% fee instead of 10% on jobs won (fee fixed in `finalize_accept_bid` from a live Stripe check) and a ★ Premium badge on bids. Stripe is the source of truth; `profiles.premium` / `premium_until` are a copy written only by the function (`sync_premium`), re-checked by the timer when `premium_until` passes. Cancel = `cancel_at_period_end` (and undo) via `set_premium_renewal`; no Stripe customer portal needed. No webhooks.
 
 ## Edge Function actions
-`create_checkout_session`, `finalize_accept_bid` (takes Checkout `sessionId`), `mark_job_done` (photo required, server sets 24h window), `approve_completion`, `file_dispute`, `submit_review`, `connect_onboarding_link`, `sync_connect_status`, `auto_release_sweep` (timer only). `create_payment_intent` is legacy/unused.
+`create_checkout_session`, `finalize_accept_bid` (takes Checkout `sessionId`), `mark_job_done` (photo required, server sets 24h window), `approve_completion`, `file_dispute`, `submit_review`, `connect_onboarding_link`, `sync_connect_status`, `create_premium_checkout`, `sync_premium`, `set_premium_renewal`, `auto_release_sweep` (timer only). `create_payment_intent` is legacy/unused.
 
 ## Status (as of 18 Oct 2026, evening)
-- Deployed function version 9 (pending-payout catch-up, retried every timer run with a 10-minute idempotency window so a failed attempt isn't stuck for 24h, and checks Stripe for an existing transfer before paying; worker Connect accounts prefilled as Irish individuals so they skip company questions — unfinished accounts without the `oncall_prefill` metadata tag are replaced). Stripe sandbox needed "Accounts v1 support" switched on (Settings → API policies) for Connect account creation; consider moving to Accounts v2 before live. Premium hidden in the app and `premium` no longer client-writable. Poster now sees the "job done" photo after payout and during a dispute.
+- Deployed function version 10 (Premium subscription; pending-payout catch-up, retried every timer run with a 10-minute idempotency window so a failed attempt isn't stuck for 24h, and checks Stripe for an existing transfer before paying; worker Connect accounts prefilled as Irish individuals so they skip company questions — unfinished accounts without the `oncall_prefill` metadata tag are replaced). Stripe sandbox needed "Accounts v1 support" switched on (Settings → API policies) for Connect account creation; consider moving to Accounts v2 before live. `premium` is not client-writable. Poster now sees the "job done" photo after payout and during a dispute.
 
 Tested end to end in the user's hands: signup/login, profile, post job with photo, bid, messaging, accept + pay with test card 4242…, mark done with photo, approve & release, rating, reminder email, worker payout onboarding (Connect), and automatic payout to the worker on approval ("Moving furniture" €40 → €36 transferred 2 s after approval, 18 Oct). The earlier stuck €54 was also paid.
 
@@ -39,7 +42,7 @@ Test accounts: `natbooth252@gmail.com` (poster) and `natbooth252+worker@gmail.co
 ## To-do, most important first
 1. **Domain** for Resend so reminder emails reach real users; then set `EMAIL_FROM`.
 2. Leftovers to clean up — deletes from chat time out (Supabase holds them for a confirmation), so do it in the dashboard: test task "TEST reminder email (ignore)" (id `da8911db-…`, nothing references it), table `public.site_pages`, Storage bucket `site` (holds one old `oncall-mvp.html`).
-3. Premium (optional, later): if wanted, build a real Stripe subscription and make the server charge the lower fee. Currently hidden.
+3. **Test Premium** with card 4242: Profile → Go Premium → pay → badge shows; win a job and check the fee is 6%; Cancel Premium shows "Ends on …".
 4. Before launch: switch Stripe to live keys, solicitor-reviewed terms, ID verification is currently a fake toggle (`verified` set by the client).
 
 ## How to ship changes
