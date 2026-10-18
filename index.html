@@ -456,6 +456,13 @@ async function loadMyPostedTasks(){
 async function loadMyBids(){
   const { data, error } = await sb.from('bids').select(BID_SELECT).eq('worker_id', session.user.id).order('created_at',{ascending:false});
   if(error){ state.myBids=[]; return; }
+  // Which of my finished jobs has the money actually been sent for?
+  const doneIds=(data||[]).filter(r=>r.task.completed && r.task.accepted_bid_id===r.id).map(r=>r.task.id);
+  const paidOut=new Set();
+  if(doneIds.length){
+    const { data: pays } = await sb.from('payments').select('task_id,payout_transfer_id').in('task_id', doneIds);
+    (pays||[]).forEach(p=>{ if(p.payout_transfer_id) paidOut.add(p.task_id); });
+  }
   state.myBids = (data||[]).map(row=>({
     bid: { id: row.id, price: `€${row.price}`, premium: !!row.premium },
     task: {
@@ -465,6 +472,7 @@ async function loadMyBids(){
       workerCompletedAt: row.task.worker_completed_at ? new Date(row.task.worker_completed_at).getTime() : null,
       autoReleaseAt: row.task.auto_release_at ? new Date(row.task.auto_release_at).getTime() : null,
       disputed: row.task.disputed, rated: row.task.rated,
+      paidOut: paidOut.has(row.task.id),
     }
   }));
 }
@@ -1080,7 +1088,9 @@ function renderProfile(){
       let payHtml='';
       if(t.accepted===b.id){
         if(t.completed){
-          payHtml=`<div class="paybox released"><div class="paybox-top released-text">✓ €${feeBreakdown(b.price).net} paid out</div></div>`;
+          payHtml = t.paidOut
+            ? `<div class="paybox released"><div class="paybox-top released-text">✓ €${feeBreakdown(b.price).net} paid out</div></div>`
+            : `<div class="paybox held"><div class="paybox-top held-text">⏳ €${feeBreakdown(b.price).net} on its way</div><div class="paybox-sub">Approved. It's sent to your bank once your payout account is set up — check Settings → Getting paid. We retry every 15 minutes.</div></div>`;
         } else if(t.workerCompletedAt){
           payHtml=`<div class="paybox held"><div class="paybox-top held-text">⏳ Waiting on ${t.poster} to approve</div><div class="paybox-sub">Auto-releases in <span class="mono" data-countdown="${t.id}">calculating…</span> if they don't respond.</div></div>`;
         } else {

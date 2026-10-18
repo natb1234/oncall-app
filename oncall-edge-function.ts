@@ -289,8 +289,8 @@ async function releaseTaskPayment(taskId: string, callerId: string | null, mode:
 }
 
 // ---------- 4b. Send a worker their share of a released job ----------
-// Safe to call more than once for the same job: it skips jobs already paid,
-// and Stripe's idempotency key stops a double transfer if two calls race.
+// Safe to call more than once for the same job: it skips jobs already paid
+// (in our database or in Stripe), and an idempotency key covers two calls racing.
 async function isPayoutReady(accountId: string) {
   const account = await stripe.accounts.retrieve(accountId);
   return account.capabilities?.transfers === "active";
@@ -310,13 +310,23 @@ async function payWorkerForTask(taskId: string, workerId: string): Promise<strin
   const payoutCents = pi.amount_received - Math.round(Number(payment.platform_fee) * 100);
   if (payoutCents <= 0) return null;
 
-  const transfer = await stripe.transfers.create({
-    amount: payoutCents,
-    currency: "eur",
-    destination: accountId,
-    source_transaction: typeof pi.latest_charge === "string" ? pi.latest_charge : pi.latest_charge?.id,
-    metadata: { taskId, workerId },
-  }, { idempotencyKey: `oncall-payout-${taskId}` });
+  // Guard against paying twice: if a transfer for this job already exists in
+  // Stripe (e.g. the database update after it failed), just record it.
+  const existing = await stripe.transfers.list({ destination: accountId, limit: 100 });
+  let transfer = existing.data.find((t) => t.metadata?.taskId === taskId && !t.reversed);
+  if (!transfer) {
+    // The key changes every 10 minutes: it still stops two near-simultaneous calls
+    // from both paying, but a failed attempt (which Stripe remembers per key for
+    // 24h) can be retried by the next timer run.
+    const window = Math.floor(Date.now() / (10 * 60 * 1000));
+    transfer = await stripe.transfers.create({
+      amount: payoutCents,
+      currency: "eur",
+      destination: accountId,
+      source_transaction: typeof pi.latest_charge === "string" ? pi.latest_charge : pi.latest_charge?.id,
+      metadata: { taskId, workerId },
+    }, { idempotencyKey: `oncall-payout-${taskId}-${window}` });
+  }
 
   await db.from("payments").update({
     payout_transfer_id: transfer.id,

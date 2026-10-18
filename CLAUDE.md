@@ -27,14 +27,14 @@ On release the server captures the payment and, if the worker's Stripe Connect a
 `create_checkout_session`, `finalize_accept_bid` (takes Checkout `sessionId`), `mark_job_done` (photo required, server sets 24h window), `approve_completion`, `file_dispute`, `submit_review`, `connect_onboarding_link`, `sync_connect_status`, `auto_release_sweep` (timer only). `create_payment_intent` is legacy/unused.
 
 ## Status (as of 18 Oct 2026, evening)
-- Deployed function version 8 (pending-payout catch-up; worker Connect accounts prefilled as Irish individuals so they skip company questions — unfinished accounts without the `oncall_prefill` metadata tag are replaced). Stripe sandbox needed "Accounts v1 support" switched on (Settings → API policies) for Connect account creation; consider moving to Accounts v2 before live. Premium hidden in the app and `premium` no longer client-writable. Poster now sees the "job done" photo after payout and during a dispute.
+- Deployed function version 9 (pending-payout catch-up, retried every timer run with a 10-minute idempotency window so a failed attempt isn't stuck for 24h, and checks Stripe for an existing transfer before paying; worker Connect accounts prefilled as Irish individuals so they skip company questions — unfinished accounts without the `oncall_prefill` metadata tag are replaced). Stripe sandbox needed "Accounts v1 support" switched on (Settings → API policies) for Connect account creation; consider moving to Accounts v2 before live. Premium hidden in the app and `premium` no longer client-writable. Poster now sees the "job done" photo after payout and during a dispute.
 
 Tested end to end in the user's hands: signup/login, profile, post job with photo, bid, messaging, accept + pay with test card 4242…, mark done with photo, approve & release, rating, reminder email.
 
 Test accounts: `natbooth252@gmail.com` (poster) and `natbooth252+worker@gmail.com` (worker, name "Nay").
 
 ## To-do, most important first
-1. **Test worker payouts in the app:** as Nay, Settings → "Getting paid" → finish Stripe test onboarding. On return the app should say €54 is on its way (the "Paint a bookshelf" job, still unpaid in the platform balance). Then run a new job end to end and check the worker gets paid on approval.
+1. **Test a fresh job end to end:** Nay's payout account is connected and the old €54 ("Paint a bookshelf") was transferred on 18 Oct. Next: post → bid → accept/pay → mark done → approve, and check the worker is paid straight away (`payments.payout_transfer_id` set). Workers now see "on its way" until the transfer really happens, then "paid out".
 2. **Domain** for Resend so reminder emails reach real users; then set `EMAIL_FROM`.
 3. Leftovers to clean up — deletes from chat time out (Supabase holds them for a confirmation), so do it in the dashboard: test task "TEST reminder email (ignore)" (id `da8911db-…`, nothing references it), table `public.site_pages`, Storage bucket `site` (holds one old `oncall-mvp.html`).
 4. Premium (optional, later): if wanted, build a real Stripe subscription and make the server charge the lower fee. Currently hidden.
