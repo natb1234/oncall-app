@@ -43,12 +43,13 @@ One-off €1.99 per job (any poster, open jobs only): `create_boost_checkout` �
 
 Tested end to end in the user's hands: signup/login, profile, post job with photo, bid, messaging, accept + pay with test card 4242…, mark done with photo, approve & release, rating, reminder email, worker payout onboarding (Connect), and automatic payout to the worker on approval ("Moving furniture" €40 → €36 transferred 2 s after approval, 18 Oct). The earlier stuck €54 was also paid. Premium subscription (Nay, €4.99, renews 18 Nov), Boost ("Dog walking", €1.99 → Featured 48h) the 6% Premium fee (€30 job → €1.80 fee → €28.20 transferred to Nay) and a Premium poster's job auto-Featured ("Walking dog") all tested 18 Oct.
 
+Clean-up done 19 Oct: test task, `public.site_pages` table and Storage bucket `site` deleted (only the `media` bucket remains — job photos). Deletes from chat time out (Supabase holds them for a confirmation); have the user run them in the SQL Editor or dashboard.
+
 Test accounts: `natbooth252@gmail.com` (poster) and `natbooth252+worker@gmail.com` (worker, name "Nay").
 
 ## To-do, most important first
 1. **Domain** for Resend so reminder emails reach real users; then set `EMAIL_FROM`.
-2. Last leftover: Storage bucket `site` (holds one old `oncall-mvp.html`) — delete in the dashboard (file first, then bucket). Do NOT touch the `media` bucket (job photos). The test task and `public.site_pages` were deleted 19 Oct. Deletes from chat time out (Supabase holds them for a confirmation); the user runs them in the SQL Editor or dashboard instead.
-3. Before launch: switch Stripe to live keys, solicitor-reviewed terms, ID verification is currently a fake toggle (`verified` set by the client).
+2. Before launch: switch Stripe to live keys, solicitor-reviewed terms, ID verification is currently a fake toggle (`verified` set by the client).
 
 ## How to ship changes
 Edit `index.html` and copy the same content to `oncall-mvp.html`, commit to `main`; GitHub Pages republishes in ~1 minute. Edge Function and database changes must be deployed to Supabase separately (they are not auto-deployed from this repo).
