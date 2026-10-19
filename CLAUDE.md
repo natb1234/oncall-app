@@ -47,7 +47,7 @@ Test accounts: `natbooth252@gmail.com` (poster) and `natbooth252+worker@gmail.co
 
 ## To-do, most important first
 1. **Domain** for Resend so reminder emails reach real users; then set `EMAIL_FROM`.
-2. Leftovers to clean up — deletes from chat time out (Supabase holds them for a confirmation), so do it in the dashboard: test task "TEST reminder email (ignore)" (id `da8911db-…`, nothing references it), table `public.site_pages`, Storage bucket `site` (holds one old `oncall-mvp.html`).
+2. Last leftover: Storage bucket `site` (holds one old `oncall-mvp.html`) — delete in the dashboard (file first, then bucket). Do NOT touch the `media` bucket (job photos). The test task and `public.site_pages` were deleted 19 Oct. Deletes from chat time out (Supabase holds them for a confirmation); the user runs them in the SQL Editor or dashboard instead.
 3. Before launch: switch Stripe to live keys, solicitor-reviewed terms, ID verification is currently a fake toggle (`verified` set by the client).
 
 ## How to ship changes
