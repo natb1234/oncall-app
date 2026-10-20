@@ -4,8 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OnCall — MVP Prototype</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#FAFAF9; --surface:#FFFFFF; --border:#E7E5E4; --border-soft:#F0EFED;
@@ -15,8 +13,8 @@
     --radius:14px; --radius-sm:9px;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-  body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased;}
-  .mono{font-family:'IBM Plex Mono',monospace;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;}
+  .mono{font-family:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;}
   .shell{max-width:720px;margin:0 auto;min-height:100vh;background:var(--bg);display:flex;flex-direction:column;position:relative;}
 
   /* top bar */
@@ -26,7 +24,7 @@
   .tag{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-faint);border:1px solid var(--border);padding:3px 7px;border-radius:20px;}
   .searchbar{display:flex;align-items:center;gap:8px;background:var(--border-soft);border-radius:12px;padding:11px 13px;}
   .searchbar svg{flex-shrink:0;}
-  .searchbar input{border:none;background:transparent;outline:none;font-size:14.5px;flex:1;color:var(--ink);font-family:'Inter',sans-serif;}
+  .searchbar input{border:none;background:transparent;outline:none;font-size:14.5px;flex:1;color:var(--ink);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;}
   .searchbar input::placeholder{color:var(--ink-faint);}
 
   .pillscroll{display:flex;gap:8px;overflow-x:auto;padding:12px 16px 4px;scrollbar-width:none;}
@@ -64,13 +62,13 @@
   .field label{display:block;font-size:12.5px;font-weight:600;color:var(--ink-soft);margin-bottom:6px;}
   .field input, .field select, .field textarea{
     width:100%;padding:11px 13px;border:1px solid var(--border);border-radius:var(--radius-sm);
-    background:var(--surface);font-family:'Inter',sans-serif;font-size:14.5px;color:var(--ink);
+    background:var(--surface);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14.5px;color:var(--ink);
     outline:none;transition:border-color .15s ease;
   }
   .field input:focus, .field select:focus, .field textarea:focus{border-color:var(--accent);}
   .field textarea{resize:vertical;min-height:64px;}
 
-  .btn{display:block;width:100%;padding:13px 18px;background:var(--ink);color:#fff;border:none;border-radius:var(--radius-sm);font-family:'Inter',sans-serif;font-weight:600;font-size:14px;cursor:pointer;text-align:center;}
+  .btn{display:block;width:100%;padding:13px 18px;background:var(--ink);color:#fff;border:none;border-radius:var(--radius-sm);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-weight:600;font-size:14px;cursor:pointer;text-align:center;}
   .btn.accent{background:var(--accent);}
   .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--border);}
   .btn.small{width:auto;padding:8px 14px;font-size:12.5px;border-radius:8px;}
@@ -94,13 +92,13 @@
   .profcard .name{font-size:19px;font-weight:800;margin:0;letter-spacing:-0.3px;}
   .profcard .role{font-size:13px;color:var(--ink-soft);margin:3px 0 10px;}
 
-  .msgbtn{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 13px;font-family:'Inter',sans-serif;font-size:12.5px;font-weight:600;cursor:pointer;color:var(--ink);}
+  .msgbtn{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 13px;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12.5px;font-weight:600;cursor:pointer;color:var(--ink);}
   .msgbtn.filled{background:var(--accent);border-color:var(--accent);color:#fff;}
 
   .chipgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
   .chip-select{padding:10px 10px;text-align:center;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);font-size:12.5px;font-weight:500;color:var(--ink-soft);cursor:pointer;}
   .chip-select.sel{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:600;}
-  .anything-btn{margin-top:8px;width:100%;padding:10px;border:1.5px dashed var(--accent);border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--accent-ink);font-family:'Inter',sans-serif;font-size:12.5px;font-weight:600;cursor:pointer;}
+  .anything-btn{margin-top:8px;width:100%;padding:10px;border:1.5px dashed var(--accent);border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--accent-ink);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12.5px;font-weight:600;cursor:pointer;}
   .samplebtn{border:1.5px dashed var(--border);border-radius:var(--radius-sm);padding:16px;text-align:center;font-size:13px;font-weight:500;cursor:pointer;background:var(--surface);color:var(--ink-soft);}
   .samplebtn.done{border-style:solid;border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink);font-weight:600;}
 
@@ -159,7 +157,7 @@
   .bubble.them{background:var(--border-soft);border-bottom-left-radius:4px;}
   .bubble.me{background:var(--accent);color:#fff;margin-left:auto;border-bottom-right-radius:4px;}
   .modal-foot{padding:14px 18px;border-top:1px solid var(--border-soft);display:flex;gap:8px;}
-  .modal-foot input{flex:1;padding:11px 13px;border:1px solid var(--border);border-radius:10px;font-size:13.5px;font-family:'Inter',sans-serif;}
+  .modal-foot input{flex:1;padding:11px 13px;border:1px solid var(--border);border-radius:10px;font-size:13.5px;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;}
 
   .threadrow{display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--border-soft);cursor:pointer;}
   .threadava{width:40px;height:40px;border-radius:50%;background:var(--accent-soft);color:var(--accent-ink);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0;}
@@ -185,7 +183,7 @@
   .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13.5px;}
   .toggle-row:last-of-type{border-bottom:none;}
   .seg{display:flex;border:1px solid var(--border);border-radius:10px;overflow:hidden;}
-  .segbtn{flex:1;padding:9px 0;background:var(--surface);border:none;font-family:'Inter',sans-serif;font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;}
+  .segbtn{flex:1;padding:9px 0;background:var(--surface);border:none;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;}
   .segbtn+.segbtn{border-left:1px solid var(--border);}
   .segbtn.active{background:var(--ink);color:#fff;}
 </style>
@@ -203,6 +201,10 @@
     <div id="authMsg" class="hint" style="display:none;margin-bottom:10px;"></div>
     <div class="field"><label>Email</label><input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com"></div>
     <div class="field"><label>Password</label><input id="authPassword" type="password" autocomplete="current-password" placeholder="At least 6 characters"></div>
+    <label id="authTermsRow" style="display:none;align-items:flex-start;gap:9px;font-size:12.5px;color:var(--ink-soft);margin:-2px 0 14px;line-height:1.45;">
+      <input type="checkbox" id="authTerms" style="margin-top:2px;width:18px;height:18px;flex-shrink:0;">
+      <span>I'm 18 or over and I agree to the <a href="terms.html" target="_blank">Terms of Service</a>. I've read the <a href="privacy.html" target="_blank">Privacy Policy</a>.</span>
+    </label>
     <button class="btn accent" id="authSubmit">Log in</button>
   </div>
 </div>
@@ -220,7 +222,7 @@
 
 <div class="overlay" id="overlay">
   <div class="modal">
-    <div class="modal-head"><h3 id="modalTitle">Thread</h3><button class="modal-close" id="modalClose">✕</button></div>
+    <div class="modal-head"><h3 id="modalTitle">Thread</h3><div style="display:flex;gap:6px;align-items:center;"><button class="msgbtn small" id="threadReport" style="color:var(--ink-faint);">⚑ Report</button><button class="modal-close" id="modalClose">✕</button></div></div>
     <div class="modal-body" id="modalBody"></div>
     <div class="modal-foot">
       <input id="modalInput" placeholder="Type a message…" />
@@ -303,7 +305,8 @@
 
       <div class="sub">Legal</div>
       <button class="msgbtn" style="width:100%;margin-bottom:8px;" id="setTosBtn">Terms of Service</button>
-      <button class="msgbtn" style="width:100%;color:var(--ink-faint);" id="setPrivacyBtn">Privacy Policy</button>
+      <button class="msgbtn" style="width:100%;" id="setPrivacyBtn">Privacy Policy</button>
+      <div class="hint" style="margin-top:8px;">To close your account or get a copy of your data, email us — details in the Privacy Policy.</div>
 
       <div class="sub">Account</div>
       <button class="msgbtn" style="width:100%;color:#B3261E;" id="setLogoutBtn">Log out</button>
@@ -315,7 +318,7 @@
 
 <div class="overlay" id="legalOverlay">
   <div class="modal" style="border-radius:20px;">
-    <div class="modal-head"><h3>Terms of Service</h3><button class="modal-close" id="legalClose">✕</button></div>
+    <div class="modal-head"><h3 id="legalTitle">Terms of Service</h3><button class="modal-close" id="legalClose">✕</button></div>
     <div class="modal-body" id="legalBody" style="font-size:13px;line-height:1.55;color:var(--ink-soft);"></div>
   </div>
 </div>
@@ -325,12 +328,13 @@
     <div class="modal-head"><h3>Place your bid</h3><button class="modal-close" id="bidClose">✕</button></div>
     <div class="modal-body">
       <p id="bidJobTitle" style="font-size:13px;color:var(--ink-soft);margin:0 0 14px;"></p>
-      <div class="field"><label>Your bid</label><input id="bidPrice" placeholder="e.g. €140" inputmode="decimal"></div>
+      <div class="field"><label>Your bid</label><input id="bidPrice" placeholder="e.g. €140" inputmode="decimal"><div class="hint" id="bidFeeHint"></div></div>
       <div class="field"><label>Quick note to the customer (optional)</label><input id="bidNote" placeholder="e.g. Available Thursday morning"></div>
     </div>
     <div class="modal-foot">
       <button class="btn small accent" id="bidSubmit" style="flex:1;">Send bid</button>
     </div>
+    <div style="padding:0 18px 14px;"><button class="msgbtn small" id="bidReport" style="color:var(--ink-faint);">⚑ Report this job</button></div>
   </div>
 </div>
 
@@ -565,14 +569,13 @@ function ratingLineHtml(name){
   if(!r) return `<span class="ratingline">No reviews yet</span>`;
   return `<span class="ratingline"><span class="stars-sm">★</span> ${r.avg} (${r.count})</span>`;
 }
-function verifiedBadgeHtml(isVerified){
-  return isVerified ? `<span class="verified">✓ Verified</span>` : '';
-}
+// No real ID check exists yet, so no "Verified" badge is shown (a fake one creates liability).
+function verifiedBadgeHtml(isVerified){ return ''; }
 function premiumBadgeHtml(isPremium){
   return isPremium ? `<span class="premiumbadge">★ Premium</span>` : '';
 }
 function guaranteeBanner(){
-  return `<div class="guarantee"><span class="gicon">🛡️</span><span class="gtext"><strong>OnCall Guarantee</strong> — jobs under €150 are covered if something goes seriously wrong. Full terms coming soon.</span></div>`;
+  return `<div class="guarantee"><span class="gicon">🛡️</span><span class="gtext"><strong>Payment protection</strong> — when you pay through OnCall, the money is held and only released when you approve the job (or 24 hours after it's marked done with a photo). OnCall doesn't vet workers or insure jobs. <a href="#" data-opentos="safety" style="color:inherit;">Safety tips</a></span></div>`;
 }
 
 function heartIcon(filled){
@@ -617,11 +620,14 @@ function renderHome(){
   });
   if(filtered.length===0){
     app.innerHTML=`${guaranteeBanner()}<div class="grid"><div class="empty">No jobs match that search yet.</div></div>`;
+    app.querySelectorAll('[data-opentos]').forEach(a=>a.onclick=(e)=>{ e.preventDefault(); openToS(a.dataset.opentos); });
     return;
   }
   // Featured (Premium posters and boosted jobs) first; otherwise newest first, as loaded.
   const sorted=[...filtered.filter(t=>t.featuredUntil), ...filtered.filter(t=>!t.featuredUntil)];
-  app.innerHTML=`${guaranteeBanner()}<div class="grid">${sorted.map(gcard).join('')}</div>`;
+  const adNote = sorted.some(t=>t.featuredUntil) ? `<div class="hint" style="margin:-6px 0 10px;">⚡ Featured jobs are paid placements (Premium or Boost) and are shown first. <a href="#" data-opentos="ranking" style="color:inherit;">How jobs are ordered</a></div>` : '';
+  app.innerHTML=`${guaranteeBanner()}${adNote}<div class="grid">${sorted.map(gcard).join('')}</div>`;
+  app.querySelectorAll('[data-opentos]').forEach(a=>a.onclick=(e)=>{ e.preventDefault(); e.stopPropagation(); openToS(a.dataset.opentos); });
   wireGridCards();
 }
 
@@ -689,6 +695,7 @@ function openBidModal(taskId){
   document.getElementById('bidJobTitle').textContent=`Your bid for "${t.title}"`;
   document.getElementById('bidPrice').value='';
   document.getElementById('bidNote').value='';
+  updateBidFeeHint();
   document.getElementById('bidOverlay').classList.add('show');
   setTimeout(()=>document.getElementById('bidPrice').focus(),50);
 }
@@ -720,6 +727,15 @@ async function submitBid(){
 }
 document.getElementById('bidClose').onclick=closeBidModal;
 document.getElementById('bidSubmit').onclick=submitBid;
+function updateBidFeeHint(){
+  const premium=!!(state.tradeProfile && state.tradeProfile.premium);
+  const v=document.getElementById('bidPrice').value;
+  const f=feeBreakdown(v, null, premium);
+  document.getElementById('bidFeeHint').textContent = parseFloat(String(v).replace(/[^0-9.]/g,''))
+    ? `You'd receive €${f.net} after OnCall's ${premium?'6% (Premium)':'10%'} fee.`
+    : `OnCall keeps a ${premium?'6% (Premium)':'10%'} fee from the job price when you're paid.`;
+}
+document.getElementById('bidPrice').oninput=updateBidFeeHint;
 document.getElementById('bidNote').addEventListener('keydown',e=>{if(e.key==='Enter')submitBid();});
 
 // ---------- browse (saved) ----------
@@ -760,6 +776,7 @@ function renderPost(){
     </div>
     <button class="btn accent" id="postTask">Post job</button>
   `;
+  app.querySelectorAll('[data-opentos]').forEach(a=>a.onclick=(e)=>{ e.preventDefault(); openToS(a.dataset.opentos); });
 
   let attachedMedia=null;
   function renderMediaSlot(){
@@ -908,8 +925,8 @@ function renderPostedList(mineList, mine){
         ${t.featuredUntil
           ? `<div class="paybox held" style="margin-bottom:10px;"><div class="paybox-top held-text">⚡ Featured on Home</div><div class="paybox-sub">Pinned at the top until ${fmtDateTime(t.featuredUntil)}.</div></div>`
           : `<button class="btn ghost" style="margin-bottom:6px;" data-boost="${t.id}">⚡ Boost this job — ${BOOST_PRICE}</button>
-             <div class="hint" style="margin:0 0 12px;">Pins it at the top of Home for 48 hours so it gets bids faster. Premium members' jobs are featured free.</div>`}
-        <div class="paynote">Payments happen through OnCall only — arranging cash payment outside the app isn't covered by the OnCall Guarantee.</div>
+             <div class="hint" style="margin:0 0 12px;">Pins it at the top of Home for 48 hours so it gets bids faster (shown as a paid placement). Starts straight away; once the 48 hours are used you can't cancel it for a refund. Premium members' jobs are featured free.</div>`}
+        <div class="paynote">Keep payment in the app — cash or bank transfers lose the payment hold and our dispute help.</div>
         <div class="sub" style="margin:6px 0 2px;">${t.bids.length} bid${t.bids.length===1?'':'s'}</div>
         ${t.bids.length===0?`<div style="font-size:12.5px;color:var(--ink-faint);">No bids yet.</div>`:
           t.bids.map(b=>`
@@ -1034,10 +1051,6 @@ function renderProfile(){
         <div class="samplebtn" id="sampleBtn">+ Add a short work-sample clip</div>
         <div class="hint">Skills over resume — a 15-second clip of finished work beats a bullet list.</div>
       </div>
-      <div class="field"><label>Verify your identity</label>
-        <div class="verifybtn" id="verifyBtn">🪪 Verify phone number & photo ID</div>
-        <div class="hint">Verified profiles get a badge and are trusted with more bids — you can also do this later.</div>
-      </div>
       <div class="field"><label>How far will you travel? <span id="radiusVal" class="mono" style="color:var(--accent);">15km</span></label>
         <input id="rRadius" type="range" min="1" max="30" value="15" style="width:100%;accent-color:var(--accent);">
         <div class="hint">Jobs outside this range won't show up on Home.</div>
@@ -1047,12 +1060,7 @@ function renderProfile(){
     `;
     mountSettings(document.getElementById('profileSettings'));
     document.getElementById('rRadius').oninput=e=>{document.getElementById('radiusVal').textContent=e.target.value+'km';};
-    let isVerified=false;
-    document.getElementById('verifyBtn').onclick=e=>{
-      isVerified=!isVerified;
-      e.target.classList.toggle('done',isVerified);
-      e.target.textContent=isVerified?'✓ Identity verified':'🪪 Verify phone number & photo ID';
-    };
+    const isVerified=false;
     let hasSample=false;
     document.getElementById('sampleBtn').onclick=e=>{
       hasSample=!hasSample;
@@ -1105,7 +1113,6 @@ function renderProfile(){
       <div style="margin-bottom:8px;">${ratingLineHtml(p.name)}</div>
       <div class="tags">${p.skills.map(s=>`<span class="tag">${escapeHtml(s)}</span>`).join('')}</div>
       <div class="tags" style="margin-top:8px;">${p.sample?`<span class="badge">Work sample attached</span>`:''}${premiumBadgeHtml(p.premium)}</div>
-      ${!p.verified?`<button class="verifybtn" id="verifyLaterBtn" style="margin-top:12px;">🪪 Verify phone number & photo ID</button>`:''}
     </div>
 
     <div class="sub">OnCall Premium</div>
@@ -1186,6 +1193,20 @@ function renderBidsList(myBidsList, myBids){
     });
   }
 }
+
+// ---------- reporting (illegal content / rule breaks) ----------
+async function reportSomething(payload, what){
+  const reason=prompt(`What's wrong with this ${what}? Please explain briefly (e.g. illegal, dangerous, scam, abusive). We review every report.`);
+  if(reason===null) return;
+  if(reason.trim().length<5){ toast('Please say a bit more about the problem.'); return; }
+  try{ await callFn('submit_report', {...payload, reason: reason.trim()}); toast('Thanks — your report was sent. We\'ll review it and let you know what we decide.'); }
+  catch(e){ toast(e.message); }
+}
+document.getElementById('bidReport').onclick=()=>{ if(state.pendingBidTaskId) reportSomething({kind:'task', taskId:state.pendingBidTaskId}, 'job'); };
+document.getElementById('threadReport').onclick=()=>{
+  const ov=document.getElementById('overlay');
+  reportSomething({kind:'user', taskId:ov.dataset.taskId, userId:ov.dataset.counterpartId}, 'person or their messages');
+};
 
 // ---------- messaging ----------
 async function openThread(taskId, counterpartId, title){
@@ -1373,7 +1394,9 @@ function renderPremiumCard(){
     </div>
     ${active ? `<div class="hint" style="margin:-4px 0 10px;">${cancelling?`Premium ends on ${fmtDate(until)}. You won't be charged again.`:`Renews on ${fmtDate(until)}.`} The fee on a job is set when your bid is accepted.</div>` : ''}
     <button class="btn ${active?'ghost':'accent'}" id="premiumBtn">${active?(cancelling?'Keep Premium':'Cancel Premium'):'Go Premium — '+PREMIUM_PRICE+'/month'}</button>
+    ${active?'':`<div class="hint" style="margin-top:8px;">Renews monthly until you cancel. By continuing you ask us to start Premium straight away; you can still cancel within 14 days for a refund of the unused part. <a href="#" data-opentos="premium" style="color:inherit;">Terms</a></div>`}
   `;
+  card.querySelectorAll('[data-opentos]').forEach(a=>a.onclick=(e)=>{ e.preventDefault(); openToS(a.dataset.opentos); });
   document.getElementById('premiumBtn').onclick=async (e)=>{
     const btn=e.currentTarget;
     try{
@@ -1435,50 +1458,17 @@ document.getElementById('setPayoutBtn').onclick=async ()=>{
   }catch(e){ toast(e.message); btn.disabled=false; btn.textContent='Set up'; }
 };
 document.getElementById('setTosBtn').onclick=()=>{ closeSettings(); openToS(); };
-document.getElementById('setPrivacyBtn').onclick=()=>{ toast('Full Privacy Policy is being finalised before launch.'); };
+document.getElementById('setPrivacyBtn').onclick=()=>{ closeSettings(); openToS(null,'privacy'); };
 document.getElementById('setLogoutBtn').onclick=async ()=>{
   closeSettings();
   await sb.auth.signOut();
 };
 
-function openToS(section){
-  const body=document.getElementById('legalBody');
-  body.innerHTML=`
-    <p style="font-size:11.5px;color:var(--ink-faint);margin-top:0;">Summary for this prototype — not a substitute for the full Terms of Service, which will be reviewed by a solicitor before launch.</p>
-
-    <div class="sub" style="margin-top:18px;">What OnCall is</div>
-    <p>OnCall connects people posting small, same-day jobs with people willing to do them. OnCall isn't the employer of anyone doing a job — the agreement is directly between the poster and the worker. You must be 18 or older to use OnCall.</p>
-
-    <div class="sub">Payments & escrow</div>
-    <p>When a bid is accepted, the poster's card is charged straight away and the money is held by OnCall — not paid to the worker yet.</p>
-
-    <div class="sub">Fees & Premium</div>
-    <p>OnCall keeps a <strong>10% fee</strong> from the price of each job; the worker receives the rest. Workers with <strong>OnCall Premium</strong> (${PREMIUM_PRICE} a month, cancel anytime) pay a <strong>6% fee</strong> instead. The fee is fixed at the moment a bid is accepted. Cancelling Premium stops future charges; you keep Premium until the end of the month you've paid for. No refunds for part months.</p>
-    <p><strong>Boost</strong> (${BOOST_PRICE} per job) pins one job at the top of Home for 48 hours. It's charged once, and isn't refunded if the job gets no bids or you cancel it.</p>
-
-    <div class="sub">1. Photo evidence before payout</div>
-    <p>A worker must mark the job done <strong>with a photo</strong> of the finished work before any payment is released. No photo, no payout — this protects both sides if something's disputed later.</p>
-
-    <div class="sub">2. Payments must stay on OnCall</div>
-    <p>Arranging payment outside the app — cash, bank transfer, another app — isn't allowed. Doing so <strong>forfeits the OnCall Guarantee and our dispute-resolution help</strong> for that job. We can only step in on payments that went through OnCall.</p>
-
-    <div class="sub" id="tos-disputes">Approval, auto-release & disputes</div>
-    <p>Once a worker marks a job done, the poster can approve it to release payment right away. If the poster doesn't respond within the auto-release window — <strong>24 hours</strong> — payment releases automatically, so a worker's money is never left stuck waiting on someone who's gone quiet.</p>
-    <p>If something's wrong with the finished job, the poster can report a problem instead of approving. That pauses the auto-release and opens a dispute for OnCall to review before any money moves.</p>
-
-    <div class="sub">OnCall Guarantee</div>
-    <p>Jobs paid for through OnCall may be covered if something seriously goes wrong — full terms and an actual insurance policy are still being finalised.</p>
-
-    <div class="sub">Full legal terms</div>
-    <p>This is a simplified in-app summary. The full Terms of Service and Privacy Policy — covering liability, data protection, worker status, and dispute resolution in detail — will be published and reviewed by a solicitor before OnCall launches publicly.</p>
-  `;
+function openToS(section, doc){
+  const page=(doc||'terms')+'.html'+(section?'#'+section:'');
+  document.getElementById('legalTitle').textContent = doc==='privacy' ? 'Privacy Policy' : 'Terms of Service';
+  document.getElementById('legalBody').innerHTML=`<iframe src="${page}" style="border:0;width:100%;height:70vh;display:block;"></iframe><div style="padding:10px 0 0;"><a href="${page}" target="_blank" style="font-size:12.5px;color:var(--accent);">Open in a new tab</a></div>`;
   document.getElementById('legalOverlay').classList.add('show');
-  if(section){
-    setTimeout(()=>{
-      const el=document.getElementById('tos-'+section);
-      if(el) el.scrollIntoView({block:'start'});
-    },50);
-  }
 }
 document.getElementById('legalClose').onclick=()=>document.getElementById('legalOverlay').classList.remove('show');
 
@@ -1534,6 +1524,7 @@ document.querySelectorAll('#authModeSeg .segbtn').forEach(b=>b.onclick=()=>{
   authMode=b.dataset.mode;
   document.querySelectorAll('#authModeSeg .segbtn').forEach(x=>x.classList.toggle('active', x===b));
   document.getElementById('authSubmit').textContent = authMode==='login' ? 'Log in' : 'Create account';
+  document.getElementById('authTermsRow').style.display = authMode==='signup' ? 'flex' : 'none';
   document.getElementById('authPassword').setAttribute('autocomplete', authMode==='login'?'current-password':'new-password');
   document.getElementById('authMsg').style.display='none';
 });
@@ -1546,14 +1537,16 @@ document.getElementById('authSubmit').onclick=async ()=>{
   const btn=document.getElementById('authSubmit');
   btn.disabled=true;
   if(authMode==='signup'){
+    if(!document.getElementById('authTerms').checked){ btn.disabled=false; msg.textContent='Please confirm you\'re 18+ and agree to the Terms to create an account.'; msg.style.display='block'; return; }
     btn.textContent='Creating account…';
-    const { error } = await sb.auth.signUp({ email, password });
+    const { error } = await sb.auth.signUp({ email, password, options:{ data:{ terms_version:'1.0', terms_accepted_at:new Date().toISOString() } } });
     btn.disabled=false;
     if(error){ btn.textContent='Create account'; msg.textContent=error.message; msg.style.display='block'; return; }
     msg.textContent='Account created — check your email to confirm it, then log in here.';
     msg.style.display='block';
     authMode='login';
     document.querySelectorAll('#authModeSeg .segbtn').forEach(x=>x.classList.toggle('active', x.dataset.mode==='login'));
+    document.getElementById('authTermsRow').style.display='none';
     btn.textContent='Log in';
   } else {
     btn.textContent='Logging in…';

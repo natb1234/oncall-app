@@ -103,6 +103,8 @@ Deno.serve(async (req: Request) => {
         return await createBoostCheckout(caller, body);
       case "finalize_boost":
         return await finalizeBoost(caller, body);
+      case "submit_report":
+        return await submitReport(caller, body);
       default:
         return json({ error: "Unknown action." }, 400);
     }
@@ -597,6 +599,50 @@ async function finalizeBoost(caller: any, body: any) {
   const featuredUntil = new Date(Date.now() + FEATURED_HOURS * 3600 * 1000).toISOString();
   await db.from("tasks").update({ featured_until: featuredUntil, boost_session_id: sessionId }).eq("id", taskId);
   return json({ ok: true, featuredUntil });
+}
+
+// ---------- 7d. Reports of illegal content / rule breaks (EU Digital Services Act) ----------
+// Saved in public.reports and emailed to the owner (REPORTS_EMAIL secret, or the
+// Resend account owner while there's no domain).
+const REPORTS_EMAIL = Deno.env.get("REPORTS_EMAIL") ?? "natbooth252@gmail.com";
+
+async function submitReport(caller: any, body: any) {
+  const { kind, taskId, userId } = body;
+  const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 2000) : "";
+  if (kind !== "task" && kind !== "user") return json({ error: "Unknown report type." }, 400);
+  if (reason.length < 5) return json({ error: "Please say a bit more about the problem." }, 400);
+
+  // Simple abuse limit: 20 reports per person per day.
+  const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const { count } = await db.from("reports").select("id", { count: "exact", head: true })
+    .eq("reporter_id", caller.id).gte("created_at", since);
+  if ((count ?? 0) >= 20) return json({ error: "You've sent a lot of reports today — please email us instead." }, 429);
+
+  let task: any = null;
+  if (taskId) {
+    const { data } = await db.from("tasks").select("id, title, poster_id").eq("id", taskId).maybeSingle();
+    task = data;
+  }
+  if (kind === "task" && !task) return json({ error: "Job not found." }, 404);
+  const reportedUserId = kind === "task" ? task.poster_id : userId;
+  if (!reportedUserId) return json({ error: "Who are you reporting?" }, 400);
+
+  const { data: report, error } = await db.from("reports").insert({
+    reporter_id: caller.id, kind, task_id: task?.id ?? null, reported_user_id: reportedUserId, reason,
+  }).select("id").single();
+  if (error) throw error;
+
+  const { data: reported } = await db.from("profiles").select("name").eq("id", reportedUserId).maybeSingle();
+  try {
+    await sendEmail(REPORTS_EMAIL, `OnCall report: ${kind === "task" ? "job" : "user"} — ${String(task?.title ?? reported?.name ?? "").slice(0, 60)}`,
+      `<p><strong>New report</strong> (${escapeHtml(kind)})</p>
+       <p><strong>Job:</strong> ${escapeHtml(task?.title ?? "—")}<br>
+       <strong>Reported user:</strong> ${escapeHtml(reported?.name ?? reportedUserId)}<br>
+       <strong>From:</strong> ${escapeHtml(caller.email ?? caller.id)}</p>
+       <p><strong>Reason:</strong><br>${escapeHtml(reason)}</p>
+       <p>Report id ${report.id}. Review it in Supabase → Table Editor → reports, set status and a decision note, and reply to the reporter.</p>`);
+  } catch (e) { console.error("report email", e); }
+  return json({ ok: true });
 }
 
 // ---------- 8a. Reminder email to the poster ~4 hours before auto-release ----------
