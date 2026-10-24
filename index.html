@@ -52,7 +52,10 @@
   .areachip{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:7px 12px;border-radius:20px;border:1.5px solid var(--border);background:var(--surface);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;max-width:100%;}
   .areachip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .areachip.unset{border-color:var(--accent);color:var(--accent-ink);background:var(--accent-soft);}
-  #areaMap{height:300px;border-radius:12px;overflow:hidden;border:1px solid var(--border);margin:10px 0 12px;z-index:0;}
+  .radiuschips{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;}
+  .radiuschips button{padding:6px 11px;border-radius:16px;border:1.5px solid var(--border);background:var(--surface);font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;}
+  .radiuschips button.sel{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink);}
+  #areaMap{height:min(300px,36vh);border-radius:12px;overflow:hidden;border:1px solid var(--border);margin:10px 0 12px;z-index:0;}
   .arearow{display:flex;gap:8px;}
   .arearow input{flex:1;}
   .radiusval{font-weight:800;color:var(--accent-ink);}
@@ -338,6 +341,17 @@
   <div class="modal" style="border-radius:20px;">
     <div class="modal-head"><h3 id="areaTitle">Your area</h3><button class="modal-close" id="areaClose">✕</button></div>
     <div class="modal-body">
+      <div id="areaRadiusWrap" style="margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+          <span style="font-size:13px;font-weight:600;color:var(--ink-soft);">How far will you travel?</span>
+          <span class="radiusval" id="areaRadiusVal" style="font-size:20px;">20 km</span>
+        </div>
+        <input id="areaRadius" type="range" min="0" max="13" step="1" style="width:100%;height:32px;accent-color:var(--accent);">
+        <div class="radiuschips" id="radiusChips">
+          <button data-km="5">5 km</button><button data-km="10">10 km</button><button data-km="20">20 km</button>
+          <button data-km="40">40 km</button><button data-km="100">100 km</button><button data-km="500">All of Ireland</button>
+        </div>
+      </div>
       <button class="msgbtn" id="areaLocate" style="width:100%;">📍 Use my current location</button>
       <div class="arearow" style="margin-top:10px;">
         <input id="areaSearch" placeholder="Search a town or area" enterkeyhint="search">
@@ -345,10 +359,6 @@
       </div>
       <div id="areaMap"></div>
       <div class="hint" id="areaHint" style="margin:-4px 0 10px;">Tap the map to move the pin.</div>
-      <div id="areaRadiusWrap">
-        <label style="font-size:13px;font-weight:600;">Distance: <span class="radiusval" id="areaRadiusVal">20 km</span></label>
-        <input id="areaRadius" type="range" min="0" max="10" step="1" style="width:100%;accent-color:var(--accent);">
-      </div>
       <div class="field" id="areaLabelWrap" style="margin-top:8px;"><label>Area name shown to others</label><input id="areaLabel" placeholder="e.g. Enniscorthy" maxlength="80"></div>
       <div class="hint" style="font-size:10.5px;">Map © <a href="https://www.openstreetmap.org/copyright" target="_blank" style="color:inherit;">OpenStreetMap</a> contributors. Locations are saved only to about 1 km.</div>
     </div>
@@ -491,7 +501,8 @@ async function loadMyProfile(){
 }
 
 // ---------- travel zone (search area: centre + radius, like Facebook Marketplace) ----------
-const RADIUS_STEPS=[1,2,5,10,15,20,30,40,60,80,100];
+const RADIUS_STEPS=[1,2,5,10,15,20,30,40,60,80,100,150,250,500];
+function fmtRadius(km){ return km>=500 ? 'All of Ireland' : km+' km'; }
 const DEFAULT_CENTER={lat:53.35, lng:-7.7}; // middle of Ireland, used before an area is set
 // Saved on the profile; before a profile exists, kept on this device only.
 function loadArea(){
@@ -567,20 +578,26 @@ function openAreaSheet(mode, start, onApply){
   },60);
 }
 function setAreaPoint(lat,lng,keepZoom){ areaSheet.lat=lat; areaSheet.lng=lng; areaSheet.hasPoint=true; drawArea(!keepZoom); }
+function updateRadiusUi(){
+  document.getElementById('areaRadiusVal').textContent = fmtRadius(areaSheet.radius);
+  document.getElementById('areaRadius').value = Math.max(0, RADIUS_STEPS.indexOf(areaSheet.radius));
+  document.querySelectorAll('#radiusChips button').forEach(b=>b.classList.toggle('sel', +b.dataset.km===areaSheet.radius));
+}
 function drawArea(fit){
   const L=window.L; if(!areaMap) return;
   const ll=[areaSheet.lat, areaSheet.lng];
   if(areaMarker){ areaMarker.remove(); areaMarker=null; }
   if(areaCircle){ areaCircle.remove(); areaCircle=null; }
-  if(!areaSheet.hasPoint){ areaMap.setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 6); return; }
+  if(!areaSheet.hasPoint){ areaMap.setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 6); updateRadiusUi(); return; }
   areaMarker=L.circleMarker(ll,{radius:7, color:'#fff', weight:2, fillColor:'#0F9D6D', fillOpacity:1}).addTo(areaMap);
   if(areaSheet.mode==='area'){
     areaCircle=L.circle(ll,{radius:areaSheet.radius*1000, color:'#0F9D6D', weight:2, fillColor:'#0F9D6D', fillOpacity:0.12}).addTo(areaMap);
     if(fit) areaMap.fitBounds(areaCircle.getBounds(),{padding:[16,16]});
   } else if(fit){ areaMap.setView(ll, 13); }
-  document.getElementById('areaRadiusVal').textContent = areaSheet.radius+' km';
+  updateRadiusUi();
 }
 document.getElementById('areaRadius').oninput=e=>{ areaSheet.radius=RADIUS_STEPS[+e.target.value]; drawArea(true); };
+document.querySelectorAll('#radiusChips button').forEach(b=>b.onclick=()=>{ areaSheet.radius=+b.dataset.km; drawArea(true); });
 document.getElementById('areaClose').onclick=()=>document.getElementById('areaOverlay').classList.remove('show');
 document.getElementById('areaLocate').onclick=()=>{
   if(!navigator.geolocation){ toast('Location isn\'t available on this device — search for a town instead.'); return; }
@@ -754,7 +771,7 @@ function renderTopbar(){
           <input id="searchInput" placeholder="Search jobs near you" value="${state.homeFilter.q}">
         </div>
         ${state.area
-          ? `<button class="areachip" id="areaChip">📍 <span>${escapeHtml(state.area.label||'Your area')} · ${state.area.radius} km</span> ▾</button>`
+          ? `<button class="areachip" id="areaChip">📍 <span>${escapeHtml(state.area.label||'Your area')} · ${fmtRadius(state.area.radius)}</span> ▾</button>`
           : `<button class="areachip unset" id="areaChip">📍 <span>Set your area to see jobs near you</span></button>`}
       </div>
       <div class="pillscroll" id="pillScroll">
@@ -800,7 +817,7 @@ function renderHome(){
   const sorted=[...inZone.filter(t=>t.featuredUntil), ...inZone.filter(t=>!t.featuredUntil)];
   const adNote = sorted.some(t=>t.featuredUntil) ? `<div class="hint" style="margin:-6px 0 10px;">⚡ Featured jobs are paid placements (Premium or Boost) and are shown first. <a href="#" data-opentos="ranking" style="color:inherit;">How jobs are ordered</a></div>` : '';
   const emptyZone = area && sorted.length===0
-    ? `<div class="empty">No jobs within ${area.radius} km of ${escapeHtml(area.label||'your area')} yet. <a href="#" id="widenArea" style="color:var(--accent);">Increase your distance</a></div>` : '';
+    ? `<div class="empty">No jobs within ${fmtRadius(area.radius)} of ${escapeHtml(area.label||'your area')} yet. <a href="#" id="widenArea" style="color:var(--accent);">Increase your distance</a></div>` : '';
   const noPinHtml = noPin.length ? `<div class="subhead">Location not on the map</div>${noPin.map(gcard).join('')}` : '';
   app.innerHTML=`${guaranteeBanner()}${adNote}<div class="grid">${sorted.map(gcard).join('')}${emptyZone}${noPinHtml}</div>`;
   const widen=document.getElementById('widenArea');
