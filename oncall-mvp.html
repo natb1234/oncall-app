@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OnCall — MVP Prototype</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
   :root{
     --bg:#FAFAF9; --surface:#FFFFFF; --border:#E7E5E4; --border-soft:#F0EFED;
@@ -47,6 +49,15 @@
   .gheart.saved svg path{fill:#E0475A;stroke:#E0475A;}
   .gday{position:absolute;z-index:2;bottom:8px;left:8px;background:rgba(28,28,30,0.75);color:#fff;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;padding:3px 7px;border-radius:20px;}
   .gbody{padding:10px 11px 12px;}
+  .areachip{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:7px 12px;border-radius:20px;border:1.5px solid var(--border);background:var(--surface);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;max-width:100%;}
+  .areachip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .areachip.unset{border-color:var(--accent);color:var(--accent-ink);background:var(--accent-soft);}
+  #areaMap{height:300px;border-radius:12px;overflow:hidden;border:1px solid var(--border);margin:10px 0 12px;z-index:0;}
+  .arearow{display:flex;gap:8px;}
+  .arearow input{flex:1;}
+  .radiusval{font-weight:800;color:var(--accent-ink);}
+  .gdist{color:var(--ink-faint);}
+  .subhead{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--ink-faint);margin:18px 0 8px;grid-column:1/-1;}
   .gcard.featured{border:2px solid var(--premium-ink);}
   .gfeatured{position:absolute;z-index:2;top:8px;left:8px;background:var(--premium-ink);color:#fff;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;padding:3px 7px;border-radius:20px;}
   .gtitle{font-size:13.5px;font-weight:700;margin:0 0 3px;line-height:1.3;color:var(--ink);}
@@ -60,12 +71,12 @@
 
   .field{margin-bottom:14px;}
   .field label{display:block;font-size:12.5px;font-weight:600;color:var(--ink-soft);margin-bottom:6px;}
-  .field input, .field select, .field textarea{
+  .field input, .field select, .field textarea, #areaSearch{
     width:100%;padding:11px 13px;border:1px solid var(--border);border-radius:var(--radius-sm);
     background:var(--surface);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14.5px;color:var(--ink);
     outline:none;transition:border-color .15s ease;
   }
-  .field input:focus, .field select:focus, .field textarea:focus{border-color:var(--accent);}
+  .field input:focus, .field select:focus, .field textarea:focus, #areaSearch:focus{border-color:var(--accent);}
   .field textarea{resize:vertical;min-height:64px;}
 
   .btn{display:block;width:100%;padding:13px 18px;background:var(--ink);color:#fff;border:none;border-radius:var(--radius-sm);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-weight:600;font-size:14px;cursor:pointer;text-align:center;}
@@ -323,6 +334,28 @@
   </div>
 </div>
 
+<div class="overlay" id="areaOverlay">
+  <div class="modal" style="border-radius:20px;">
+    <div class="modal-head"><h3 id="areaTitle">Your area</h3><button class="modal-close" id="areaClose">✕</button></div>
+    <div class="modal-body">
+      <button class="msgbtn" id="areaLocate" style="width:100%;">📍 Use my current location</button>
+      <div class="arearow" style="margin-top:10px;">
+        <input id="areaSearch" placeholder="Search a town or area" enterkeyhint="search">
+        <button class="btn small" id="areaSearchBtn">Search</button>
+      </div>
+      <div id="areaMap"></div>
+      <div class="hint" id="areaHint" style="margin:-4px 0 10px;">Tap the map to move the pin.</div>
+      <div id="areaRadiusWrap">
+        <label style="font-size:13px;font-weight:600;">Distance: <span class="radiusval" id="areaRadiusVal">20 km</span></label>
+        <input id="areaRadius" type="range" min="0" max="10" step="1" style="width:100%;accent-color:var(--accent);">
+      </div>
+      <div class="field" id="areaLabelWrap" style="margin-top:8px;"><label>Area name shown to others</label><input id="areaLabel" placeholder="e.g. Enniscorthy" maxlength="80"></div>
+      <div class="hint" style="font-size:10.5px;">Map © <a href="https://www.openstreetmap.org/copyright" target="_blank" style="color:inherit;">OpenStreetMap</a> contributors. Locations are saved only to about 1 km.</div>
+    </div>
+    <div class="modal-foot"><button class="btn small accent" id="areaApply" style="flex:1;">Apply</button></div>
+  </div>
+</div>
+
 <div class="overlay" id="bidOverlay">
   <div class="modal" style="border-radius:20px;">
     <div class="modal-head"><h3>Place your bid</h3><button class="modal-close" id="bidClose">✕</button></div>
@@ -416,7 +449,8 @@ function mapTaskRow(row){
     category: escapeHtml(row.category),
     budget: escapeHtml(row.budget_text || 'Open'),
     location: escapeHtml(row.location || '—'),
-    distance: 0,
+    lat: (typeof row.lat==='number') ? row.lat : null,
+    lng: (typeof row.lng==='number') ? row.lng : null,
     desc: escapeHtml(row.description || ''),
     media: row.media_url ? { type: row.media_type||'image', url: row.media_url } : null,
     bids: (row.bids||[]).map(b=>({
@@ -444,14 +478,140 @@ function mapProfileRow(row){
     id: row.id, name: escapeHtml(row.name), trade: escapeHtml(row.trade||''),
     experience: escapeHtml(row.experience||'—'), skills: row.skills||[],
     sample: !!row.has_sample, verified: !!row.verified,
-    radius: row.radius_km||15, premium: !!row.premium, premiumUntil: row.premium_until ? new Date(row.premium_until) : null,
+    radius: row.radius_km||15, premium: !!row.premium,
+    areaLat: (typeof row.area_lat==='number') ? row.area_lat : null, areaLng: (typeof row.area_lng==='number') ? row.area_lng : null,
+    areaLabel: escapeHtml(row.area_label||''), premiumUntil: row.premium_until ? new Date(row.premium_until) : null,
   };
 }
 
 async function loadMyProfile(){
   const { data, error } = await sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
   state.tradeProfile = (data && !error) ? mapProfileRow(data) : null;
+  loadArea();
 }
+
+// ---------- travel zone (search area: centre + radius, like Facebook Marketplace) ----------
+const RADIUS_STEPS=[1,2,5,10,15,20,30,40,60,80,100];
+const DEFAULT_CENTER={lat:53.35, lng:-7.7}; // middle of Ireland, used before an area is set
+// Saved on the profile; before a profile exists, kept on this device only.
+function loadArea(){
+  const p=state.tradeProfile;
+  if(p && p.areaLat!=null){ state.area={lat:p.areaLat, lng:p.areaLng, label:p.areaLabel, radius:p.radius}; return; }
+  let local=null; try{ local=JSON.parse(localStorage.getItem('oncall_area')||'null'); }catch(e){}
+  state.area = local && typeof local.lat==='number' ? local : null;
+}
+async function saveArea(a){
+  state.area=a;
+  try{ localStorage.setItem('oncall_area', JSON.stringify(a)); }catch(e){}
+  if(state.tradeProfile){
+    const { error } = await sb.from('profiles').update({ area_lat:a.lat, area_lng:a.lng, area_label:a.label||null, radius_km:a.radius }).eq('id', session.user.id);
+    if(error){ toast('Could not save your area: '+error.message); return; }
+    await loadMyProfile();
+  }
+}
+function distanceKm(a, b){
+  if(!a || !b || a.lat==null || b.lat==null) return null;
+  const R=6371, toRad=x=>x*Math.PI/180;
+  const dLat=toRad(b.lat-a.lat), dLng=toRad(b.lng-a.lng);
+  const h=Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+function fmtKm(d){ return d==null ? '' : (d<1 ? '<1 km' : Math.round(d)+' km'); }
+
+// OpenStreetMap place search (Nominatim). Light use only: one search per tap, no typeahead.
+async function geocodeSearch(q){
+  const url='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ie&q='+encodeURIComponent(q);
+  const r=await fetch(url,{headers:{'Accept-Language':'en'}}); const j=await r.json();
+  if(!j.length) return null;
+  return {lat:+j[0].lat, lng:+j[0].lon, label:(j[0].name||j[0].display_name.split(',')[0])};
+}
+async function reverseLabel(lat,lng){
+  try{
+    const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=12&lat=${lat}&lon=${lng}`,{headers:{'Accept-Language':'en'}});
+    const j=await r.json(); const a=j.address||{};
+    return a.town||a.city||a.village||a.suburb||a.hamlet||a.county||'';
+  }catch(e){ return ''; }
+}
+
+// The map sheet. mode 'area' = your search zone (pin + radius). mode 'pin' = a job's location.
+let areaMap=null, areaMarker=null, areaCircle=null, areaSheet=null;
+function openAreaSheet(mode, start, onApply){
+  const L=window.L;
+  if(!L){ toast('The map could not load — check your connection.'); return; }
+  const isArea = mode==='area';
+  const s0 = start || state.area || null;
+  areaSheet={ mode, lat:(s0?s0.lat:DEFAULT_CENTER.lat), lng:(s0?s0.lng:DEFAULT_CENTER.lng), label:(s0&&s0.label)||'',
+    radius:(s0&&s0.radius) || (state.area&&state.area.radius) || 20, hasPoint: !!s0, onApply };
+  document.getElementById('areaTitle').textContent = isArea ? 'Where do you want to find jobs?' : 'Where is the job?';
+  document.getElementById('areaRadiusWrap').style.display = isArea ? '' : 'none';
+  document.getElementById('areaHint').textContent = isArea
+    ? 'Tap the map to move the centre. Jobs inside the circle show on Home.'
+    : 'Tap the map to put the pin roughly where the job is. Others only see the area (about 1 km), never the exact address.';
+  document.getElementById('areaLabel').value = areaSheet.label;
+  const idx = RADIUS_STEPS.findIndex(x=>x>=areaSheet.radius);
+  document.getElementById('areaRadius').value = idx<0 ? RADIUS_STEPS.length-1 : idx;
+  areaSheet.radius = RADIUS_STEPS[+document.getElementById('areaRadius').value];
+  document.getElementById('areaOverlay').classList.add('show');
+  setTimeout(()=>{
+    if(!areaMap){
+      areaMap=L.map('areaMap',{zoomControl:true, attributionControl:false}).setView([areaSheet.lat, areaSheet.lng], 7);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18}).addTo(areaMap);
+      areaMap.on('click', async e=>{
+        setAreaPoint(e.latlng.lat, e.latlng.lng, true);
+        const lbl=await reverseLabel(e.latlng.lat, e.latlng.lng);
+        if(lbl) document.getElementById('areaLabel').value=lbl;
+      });
+    }
+    areaMap.invalidateSize();
+    drawArea(true);
+  },60);
+}
+function setAreaPoint(lat,lng,keepZoom){ areaSheet.lat=lat; areaSheet.lng=lng; areaSheet.hasPoint=true; drawArea(!keepZoom); }
+function drawArea(fit){
+  const L=window.L; if(!areaMap) return;
+  const ll=[areaSheet.lat, areaSheet.lng];
+  if(areaMarker){ areaMarker.remove(); areaMarker=null; }
+  if(areaCircle){ areaCircle.remove(); areaCircle=null; }
+  if(!areaSheet.hasPoint){ areaMap.setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 6); return; }
+  areaMarker=L.circleMarker(ll,{radius:7, color:'#fff', weight:2, fillColor:'#0F9D6D', fillOpacity:1}).addTo(areaMap);
+  if(areaSheet.mode==='area'){
+    areaCircle=L.circle(ll,{radius:areaSheet.radius*1000, color:'#0F9D6D', weight:2, fillColor:'#0F9D6D', fillOpacity:0.12}).addTo(areaMap);
+    if(fit) areaMap.fitBounds(areaCircle.getBounds(),{padding:[16,16]});
+  } else if(fit){ areaMap.setView(ll, 13); }
+  document.getElementById('areaRadiusVal').textContent = areaSheet.radius+' km';
+}
+document.getElementById('areaRadius').oninput=e=>{ areaSheet.radius=RADIUS_STEPS[+e.target.value]; drawArea(true); };
+document.getElementById('areaClose').onclick=()=>document.getElementById('areaOverlay').classList.remove('show');
+document.getElementById('areaLocate').onclick=()=>{
+  if(!navigator.geolocation){ toast('Location isn\'t available on this device — search for a town instead.'); return; }
+  const btn=document.getElementById('areaLocate'); btn.textContent='Finding you…';
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    btn.textContent='📍 Use my current location';
+    setAreaPoint(pos.coords.latitude, pos.coords.longitude);
+    const lbl=await reverseLabel(pos.coords.latitude, pos.coords.longitude);
+    if(lbl) document.getElementById('areaLabel').value=lbl;
+  }, ()=>{ btn.textContent='📍 Use my current location'; toast('Couldn\'t get your location — allow location access, or search for a town.'); },
+  {enableHighAccuracy:false, timeout:10000, maximumAge:300000});
+};
+async function runAreaSearch(){
+  const q=document.getElementById('areaSearch').value.trim(); if(!q) return;
+  const btn=document.getElementById('areaSearchBtn'); btn.disabled=true;
+  try{
+    const r=await geocodeSearch(q);
+    if(!r){ toast('No place found in Ireland called "'+q+'".'); return; }
+    setAreaPoint(r.lat, r.lng); document.getElementById('areaLabel').value=r.label;
+  }catch(e){ toast('Search failed — try again.'); }
+  finally{ btn.disabled=false; }
+}
+document.getElementById('areaSearchBtn').onclick=runAreaSearch;
+document.getElementById('areaSearch').onkeydown=e=>{ if(e.key==='Enter'){ e.preventDefault(); runAreaSearch(); } };
+document.getElementById('areaApply').onclick=async ()=>{
+  if(!areaSheet.hasPoint){ toast('Pick a spot: use your location, search a town, or tap the map.'); return; }
+  const result={ lat:Math.round(areaSheet.lat*100)/100, lng:Math.round(areaSheet.lng*100)/100,
+    label: document.getElementById('areaLabel').value.trim() || 'Pinned area', radius: areaSheet.radius };
+  document.getElementById('areaOverlay').classList.remove('show');
+  if(areaSheet.onApply) await areaSheet.onApply(result);
+};
 async function loadHomeTasks(){
   const { data, error } = await sb.from('tasks').select(TASK_SELECT).is('accepted_bid_id', null).eq('completed', false).order('created_at',{ascending:false});
   if(error){ toast('Could not load jobs: '+error.message); state.tasks=[]; return; }
@@ -593,6 +753,9 @@ function renderTopbar(){
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#9A9A9E" stroke-width="2"/><path d="M21 21l-4.3-4.3" stroke="#9A9A9E" stroke-width="2" stroke-linecap="round"/></svg>
           <input id="searchInput" placeholder="Search jobs near you" value="${state.homeFilter.q}">
         </div>
+        ${state.area
+          ? `<button class="areachip" id="areaChip">📍 <span>${escapeHtml(state.area.label||'Your area')} · ${state.area.radius} km</span> ▾</button>`
+          : `<button class="areachip unset" id="areaChip">📍 <span>Set your area to see jobs near you</span></button>`}
       </div>
       <div class="pillscroll" id="pillScroll">
         <div class="catpill ${state.homeFilter.cat==='all'?'active':''}" data-cat="all">All</div>
@@ -600,6 +763,7 @@ function renderTopbar(){
       </div>
     `;
     document.getElementById('searchInput').oninput=e=>{state.homeFilter.q=e.target.value;renderHome();};
+    document.getElementById('areaChip').onclick=()=>openAreaSheet('area', state.area, async a=>{ await saveArea(a); renderTopbar(); renderHome(); });
     wrap.querySelectorAll('.catpill').forEach(p=>p.onclick=()=>{state.homeFilter.cat=p.dataset.cat;renderTopbar();renderHome();});
   } else {
     const titles={browse:'Saved jobs', post:'Post a job', jobs:'My jobs', inbox:'Inbox', profile:'Profile'};
@@ -623,10 +787,24 @@ function renderHome(){
     app.querySelectorAll('[data-opentos]').forEach(a=>a.onclick=(e)=>{ e.preventDefault(); openToS(a.dataset.opentos); });
     return;
   }
-  // Featured (Premium posters and boosted jobs) first; otherwise newest first, as loaded.
-  const sorted=[...filtered.filter(t=>t.featuredUntil), ...filtered.filter(t=>!t.featuredUntil)];
+  // Distance from your area. Inside the zone: Featured (paid) first, then nearest first.
+  // Jobs posted before locations existed (no pin) are listed after, under their own heading.
+  const area=state.area;
+  filtered.forEach(t=>{ t.distanceKm = area ? distanceKm(area, t) : null; });
+  const byDist=(a,b)=>(a.distanceKm??1e9)-(b.distanceKm??1e9);
+  let inZone, noPin=[];
+  if(area){
+    inZone=filtered.filter(t=>t.distanceKm!=null && t.distanceKm<=area.radius).sort(byDist);
+    noPin=filtered.filter(t=>t.lat==null);
+  } else inZone=filtered;
+  const sorted=[...inZone.filter(t=>t.featuredUntil), ...inZone.filter(t=>!t.featuredUntil)];
   const adNote = sorted.some(t=>t.featuredUntil) ? `<div class="hint" style="margin:-6px 0 10px;">⚡ Featured jobs are paid placements (Premium or Boost) and are shown first. <a href="#" data-opentos="ranking" style="color:inherit;">How jobs are ordered</a></div>` : '';
-  app.innerHTML=`${guaranteeBanner()}${adNote}<div class="grid">${sorted.map(gcard).join('')}</div>`;
+  const emptyZone = area && sorted.length===0
+    ? `<div class="empty">No jobs within ${area.radius} km of ${escapeHtml(area.label||'your area')} yet. <a href="#" id="widenArea" style="color:var(--accent);">Increase your distance</a></div>` : '';
+  const noPinHtml = noPin.length ? `<div class="subhead">Location not on the map</div>${noPin.map(gcard).join('')}` : '';
+  app.innerHTML=`${guaranteeBanner()}${adNote}<div class="grid">${sorted.map(gcard).join('')}${emptyZone}${noPinHtml}</div>`;
+  const widen=document.getElementById('widenArea');
+  if(widen) widen.onclick=e=>{ e.preventDefault(); document.getElementById('areaChip').click(); };
   app.querySelectorAll('[data-opentos]').forEach(a=>a.onclick=(e)=>{ e.preventDefault(); e.stopPropagation(); openToS(a.dataset.opentos); });
   wireGridCards();
 }
@@ -647,7 +825,7 @@ function gcard(t){
         <span class="gday">Same-day</span>
       </div>      <div class="gbody">
         <p class="gtitle">${t.title}</p>
-        <p class="gsub">${t.category} · ${t.location}</p>
+        <p class="gsub">${t.category} · ${t.location}${t.distanceKm!=null?` · <span class="gdist">${fmtKm(t.distanceKm)}</span>`:''}</p>
         <div class="gprice">${t.budget}</div>
       </div>
     </div>`;
@@ -763,7 +941,10 @@ function renderPost(){
       <input id="tCatOther" placeholder="e.g. Tutoring, tech setup, event help" style="margin-top:8px;display:none;">
     </div>
     <div class="field"><label>Budget</label><input id="tBudget" placeholder="e.g. €80–120"></div>
-    <div class="field"><label>Location / area</label><input id="tLoc" placeholder="e.g. Riverside"></div>
+    <div class="field"><label>Where is the job?</label>
+      <button type="button" class="areachip" id="tLocBtn" style="margin-top:0;">📍 <span id="tLocText">Set the job location</span></button>
+      <div class="hint">Others see the area and distance only (about 1 km). Share the exact address by message once you've accepted a bid.</div>
+    </div>
     <div class="field"><label>Details</label><textarea id="tDesc" placeholder="Size, timing, anything the person taking the job should know"></textarea></div>
     <div class="field"><label>Add a photo or video</label>
       <div id="mediaSlot">
@@ -779,6 +960,11 @@ function renderPost(){
   app.querySelectorAll('[data-opentos]').forEach(a=>a.onclick=(e)=>{ e.preventDefault(); openToS(a.dataset.opentos); });
 
   let attachedMedia=null;
+  // Job location starts at your search area; tap to change it on the map.
+  let jobLoc = state.area ? {lat:state.area.lat, lng:state.area.lng, label:state.area.label} : null;
+  const showJobLoc=()=>{ document.getElementById('tLocText').textContent = jobLoc ? jobLoc.label : 'Set the job location'; };
+  showJobLoc();
+  document.getElementById('tLocBtn').onclick=()=>openAreaSheet('pin', jobLoc, loc=>{ jobLoc={lat:loc.lat, lng:loc.lng, label:loc.label}; showJobLoc(); });
   function renderMediaSlot(){
     const slot=document.getElementById('mediaSlot');
     if(!attachedMedia){
@@ -821,6 +1007,7 @@ function renderPost(){
   document.getElementById('postTask').onclick=async ()=>{
     const title=document.getElementById('tTitle').value.trim();
     if(!title){toast('Add a short title for the job.');return;}
+    if(!jobLoc){toast('Set where the job is — tap "Set the job location".');return;}
     const catSelect=document.getElementById('tCat').value;
     const category = catSelect==='__other__'
       ? (document.getElementById('tCatOther').value.trim() || 'Other')
@@ -843,7 +1030,8 @@ function renderPost(){
       poster_id: session.user.id,
       title, category,
       budget_text: document.getElementById('tBudget').value.trim()||'Open',
-      location: document.getElementById('tLoc').value.trim()||null,
+      location: jobLoc.label,
+      lat: jobLoc.lat, lng: jobLoc.lng,
       description: document.getElementById('tDesc').value.trim()||null,
       media_url: mediaUrl, media_type: mediaType,
     });
@@ -1051,8 +1239,8 @@ function renderProfile(){
         <div class="samplebtn" id="sampleBtn">+ Add a short work-sample clip</div>
         <div class="hint">Skills over resume — a 15-second clip of finished work beats a bullet list.</div>
       </div>
-      <div class="field"><label>How far will you travel? <span id="radiusVal" class="mono" style="color:var(--accent);">15km</span></label>
-        <input id="rRadius" type="range" min="1" max="30" value="15" style="width:100%;accent-color:var(--accent);">
+      <div class="field"><label>How far will you travel? <span id="radiusVal" class="mono" style="color:var(--accent);">20km</span></label>
+        <input id="rRadius" type="range" min="1" max="100" value="20" style="width:100%;accent-color:var(--accent);">
         <div class="hint">Jobs outside this range won't show up on Home.</div>
       </div>
       <button class="btn accent" id="createTrade">Create profile</button>
@@ -1091,6 +1279,8 @@ function renderProfile(){
         experience: document.getElementById('rExp').value.trim()||null,
         skills: chosenSkills, has_sample: hasSample, verified: isVerified,
         radius_km: parseInt(document.getElementById('rRadius').value,10),
+        // Area already chosen on this device (before the profile existed) carries over.
+        ...(state.area ? { area_lat: state.area.lat, area_lng: state.area.lng, area_label: state.area.label||null } : {}),
       });
       btn.textContent='Create profile'; btn.disabled=false;
       if(error){ toast('Could not create profile: '+error.message); return; }
@@ -1109,7 +1299,7 @@ function renderProfile(){
         <p class="name" style="margin:0;">${p.name}</p>
         ${verifiedBadgeHtml(p.verified)}
       </div>
-      <p class="role">${p.trade} · ${p.experience} · travels up to ${p.radius}km</p>
+      <p class="role">${p.trade} · ${p.experience} · ${p.areaLabel?`works within ${p.radius} km of ${p.areaLabel}`:`travels up to ${p.radius} km`}</p>
       <div style="margin-bottom:8px;">${ratingLineHtml(p.name)}</div>
       <div class="tags">${p.skills.map(s=>`<span class="tag">${escapeHtml(s)}</span>`).join('')}</div>
       <div class="tags" style="margin-top:8px;">${p.sample?`<span class="badge">Work sample attached</span>`:''}${premiumBadgeHtml(p.premium)}</div>
@@ -1539,7 +1729,7 @@ document.getElementById('authSubmit').onclick=async ()=>{
   if(authMode==='signup'){
     if(!document.getElementById('authTerms').checked){ btn.disabled=false; msg.textContent='Please confirm you\'re 18+ and agree to the Terms to create an account.'; msg.style.display='block'; return; }
     btn.textContent='Creating account…';
-    const { error } = await sb.auth.signUp({ email, password, options:{ data:{ terms_version:'1.0', terms_accepted_at:new Date().toISOString() } } });
+    const { error } = await sb.auth.signUp({ email, password, options:{ data:{ terms_version:'1.1', terms_accepted_at:new Date().toISOString() } } });
     btn.disabled=false;
     if(error){ btn.textContent='Create account'; msg.textContent=error.message; msg.style.display='block'; return; }
     msg.textContent='Account created — check your email to confirm it, then log in here.';
