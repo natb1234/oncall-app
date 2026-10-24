@@ -655,7 +655,7 @@ async function submitReport(caller: any, body: any) {
   return json({ ok: true });
 }
 
-// ---------- 7e. ID + age verification (Stripe Identity: document + matching selfie) ----------
+// ---------- 7e. ID + age verification (Stripe Identity: ID document check, no selfie) ----------
 // We keep only the outcome (verified / under 18 / failed) and the date — never the
 // date of birth or images, which stay with Stripe.
 async function startIdCheck(caller: any, body: any) {
@@ -688,7 +688,6 @@ async function startIdCheck(caller: any, body: any) {
       document: {
         allowed_types: ["passport", "driving_license", "id_card"],
         require_live_capture: true,
-        require_matching_selfie: true,
       },
     },
     metadata: { supabase_user_id: caller.id },
@@ -734,7 +733,7 @@ async function syncIdCheck(userId: string) {
   } else if (s.status === "processing") {
     update = { id_status: "processing" };
   } else if (s.status === "requires_input") {
-    // Not submitted yet, or a check failed (blurry photo, selfie mismatch, expired ID…).
+    // Not submitted yet, or a check failed (blurry photo, unreadable or expired ID…).
     update = s.last_error
       ? { id_status: "failed", id_error: s.last_error.reason ?? "Verification didn't go through." }
       : { id_status: "pending" };
