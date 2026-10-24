@@ -18,6 +18,12 @@ const FEATURED_HOURS = 48;               // How long a boosted (or Premium poste
 const AUTO_RELEASE_HOURS = 24;   // Poster's window to approve or report a problem. Server-controlled only.
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!);
+// Restricted key with "Identity Verification Results" + "Recent Detailed Verification
+// Results" read access. Needed only to read the date of birth for the 18+ check.
+const identityKey = Deno.env.get("STRIPE_IDENTITY_KEY");
+const stripeIdentity = identityKey ? new Stripe(identityKey) : null;
+const MIN_AGE = 18;
+const MAX_ID_ATTEMPTS = 5; // Stripe charges per completed check; stop runaway retries.
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -105,6 +111,10 @@ Deno.serve(async (req: Request) => {
         return await finalizeBoost(caller, body);
       case "submit_report":
         return await submitReport(caller, body);
+      case "start_id_check":
+        return await startIdCheck(caller, body);
+      case "sync_id_check":
+        return json(await syncIdCheck(caller.id));
       default:
         return json({ error: "Unknown action." }, 400);
     }
@@ -645,6 +655,97 @@ async function submitReport(caller: any, body: any) {
   return json({ ok: true });
 }
 
+// ---------- 7e. ID + age verification (Stripe Identity: document + matching selfie) ----------
+// We keep only the outcome (verified / under 18 / failed) and the date — never the
+// date of birth or images, which stay with Stripe.
+async function startIdCheck(caller: any, body: any) {
+  const { returnUrl } = body;
+  if (typeof returnUrl !== "string" || !returnUrl.startsWith(ALLOWED_RETURN_PREFIX)) {
+    return json({ error: "Invalid return address." }, 400);
+  }
+  const { data: profile } = await db.from("profiles").select("*").eq("id", caller.id).single();
+  if (!profile) return json({ error: "Set up your profile first." }, 400);
+  if (profile.verified && profile.id_status === "verified") return json({ error: "You're already verified." }, 400);
+  if (profile.id_status === "under_18") return json({ error: "OnCall is only for people aged 18 or over." }, 403);
+
+  // Reuse an unfinished check (keeps failed attempts together, avoids paying twice).
+  if (profile.id_session_id) {
+    const existing = await stripe.identity.verificationSessions.retrieve(profile.id_session_id);
+    if (existing.status === "processing") return json({ processing: true });
+    if (existing.status === "verified") return json({ verified: (await syncIdCheck(caller.id)).verified });
+    if (existing.status === "requires_input" && existing.url) {
+      await db.from("profiles").update({ id_status: "pending" }).eq("id", caller.id);
+      return json({ url: existing.url });
+    }
+  }
+  if ((profile.id_attempts ?? 0) >= MAX_ID_ATTEMPTS) {
+    return json({ error: "Too many verification attempts — please contact us." }, 429);
+  }
+  const base = returnUrl.split("?")[0].split("#")[0];
+  const session = await stripe.identity.verificationSessions.create({
+    type: "document",
+    options: {
+      document: {
+        allowed_types: ["passport", "driving_license", "id_card"],
+        require_live_capture: true,
+        require_matching_selfie: true,
+      },
+    },
+    metadata: { supabase_user_id: caller.id },
+    return_url: `${base}?idcheck=1`,
+  } as any);
+  await db.from("profiles").update({
+    id_session_id: session.id, id_status: "pending", id_error: null,
+    id_attempts: (profile.id_attempts ?? 0) + 1,
+  }).eq("id", caller.id);
+  return json({ url: session.url });
+}
+
+function ageFromDob(dob: { day: number; month: number; year: number }) {
+  const now = new Date();
+  let age = now.getUTCFullYear() - dob.year;
+  const m = now.getUTCMonth() + 1, d = now.getUTCDate();
+  if (m < dob.month || (m === dob.month && d < dob.day)) age--;
+  return age;
+}
+
+async function syncIdCheck(userId: string) {
+  const { data: profile } = await db.from("profiles").select("id_session_id, id_status, verified").eq("id", userId).single();
+  if (!profile?.id_session_id) return { status: profile?.id_status ?? "none", verified: false };
+  if (profile.verified && profile.id_status === "verified") return { status: "verified", verified: true };
+
+  const s = await stripe.identity.verificationSessions.retrieve(profile.id_session_id);
+  let update: Record<string, unknown> = {};
+  if (s.status === "verified") {
+    if (!stripeIdentity) {
+      console.error("STRIPE_IDENTITY_KEY not set — can't check age");
+      update = { id_status: "processing", id_error: "Age check not set up yet." };
+    } else {
+      const full: any = await stripeIdentity.identity.verificationSessions.retrieve(s.id, { expand: ["verified_outputs.dob"] });
+      const dob = full.verified_outputs?.dob;
+      if (!dob?.year) {
+        update = { id_status: "failed", id_error: "We couldn't read a date of birth from that document." };
+      } else if (ageFromDob(dob) < MIN_AGE) {
+        update = { id_status: "under_18", verified: false, id_error: null };
+      } else {
+        update = { id_status: "verified", verified: true, id_verified_at: new Date().toISOString(), id_error: null };
+      }
+    }
+  } else if (s.status === "processing") {
+    update = { id_status: "processing" };
+  } else if (s.status === "requires_input") {
+    // Not submitted yet, or a check failed (blurry photo, selfie mismatch, expired ID…).
+    update = s.last_error
+      ? { id_status: "failed", id_error: s.last_error.reason ?? "Verification didn't go through." }
+      : { id_status: "pending" };
+  } else if (s.status === "canceled") {
+    update = { id_status: "none", id_session_id: null };
+  }
+  if (Object.keys(update).length) await db.from("profiles").update(update).eq("id", userId);
+  const status = (update.id_status as string) ?? profile.id_status;
+  return { status, verified: status === "verified", error: (update.id_error as string) ?? null };
+}
+
 // ---------- 8a. Reminder email to the poster ~4 hours before auto-release ----------
 const REMINDER_HOURS_BEFORE = 4;
 const APP_URL = "https://natb1234.github.io/oncall-app/";
@@ -733,6 +834,13 @@ async function autoReleaseSweep() {
       .eq("premium", true).or(`premium_until.is.null,premium_until.lt.${new Date().toISOString()}`);
     for (const p of lapsed ?? []) await syncPremium(p.id);
   } catch (e) { console.error("premium resync", e); }
+
+  // ID checks still being processed by Stripe (people who closed the app before returning).
+  try {
+    const { data: waiting } = await db.from("profiles").select("id")
+      .in("id_status", ["pending", "processing"]).not("id_session_id", "is", null).limit(50);
+    for (const p of waiting ?? []) await syncIdCheck(p.id);
+  } catch (e) { console.error("id resync", e); }
 
   // Catch-up: pay workers who finished payout setup after their job was released.
   let pendingPayouts = { paid: 0, paidAmount: 0 };

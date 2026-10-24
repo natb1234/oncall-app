@@ -447,7 +447,7 @@ function setSavedIds(ids){
 // tasks has TWO relationships to bids (bids.task_id -> tasks, and
 // tasks.accepted_bid_id -> bids), so without the hint PostgREST can't tell
 // which direction we mean.
-const TASK_SELECT = '*, poster:profiles!tasks_poster_id_fkey(id,name), bids!bids_task_id_fkey(*, worker:profiles!bids_worker_id_fkey(id,name,verified,premium))';
+const TASK_SELECT = '*, poster:profiles!tasks_poster_id_fkey(id,name), bids!bids_task_id_fkey(*, worker:profiles!bids_worker_id_fkey(id,name,verified,id_status,premium))';
 const BID_SELECT = '*, task:tasks!bids_task_id_fkey(id,title,location,poster_id,accepted_bid_id,completed,worker_completed_at,auto_release_at,disputed,rated, poster:profiles!tasks_poster_id_fkey(id,name))';
 
 function mapTaskRow(row){
@@ -468,7 +468,7 @@ function mapTaskRow(row){
       name: escapeHtml(b.worker && b.worker.name || 'Someone'),
       price: `€${b.price}`,
       note: escapeHtml(b.note || 'Available to start soon.'),
-      premium: !!(b.worker && b.worker.premium), verified: !!(b.worker && b.worker.verified),
+      premium: !!(b.worker && b.worker.premium), verified: !!(b.worker && b.worker.verified && b.worker.id_status==='verified'),
     })),
     accepted: row.accepted_bid_id,
     completed: row.completed,
@@ -487,10 +487,12 @@ function mapProfileRow(row){
   return {
     id: row.id, name: escapeHtml(row.name), trade: escapeHtml(row.trade||''),
     experience: escapeHtml(row.experience||'—'), skills: row.skills||[],
-    sample: !!row.has_sample, verified: !!row.verified,
+    sample: !!row.has_sample, verified: !!row.verified && row.id_status==='verified',
     radius: row.radius_km||15, premium: !!row.premium,
     areaLat: (typeof row.area_lat==='number') ? row.area_lat : null, areaLng: (typeof row.area_lng==='number') ? row.area_lng : null,
-    areaLabel: escapeHtml(row.area_label||''), premiumUntil: row.premium_until ? new Date(row.premium_until) : null,
+    areaLabel: escapeHtml(row.area_label||''),
+    idStatus: row.id_status||'none', idError: row.id_error||'',
+    idVerified: !!row.verified && row.id_status==='verified', premiumUntil: row.premium_until ? new Date(row.premium_until) : null,
   };
 }
 
@@ -750,13 +752,14 @@ function ratingLineHtml(name){
   if(!r) return `<span class="ratingline">No reviews yet</span>`;
   return `<span class="ratingline"><span class="stars-sm">★</span> ${r.avg} (${r.count})</span>`;
 }
-// No real ID check exists yet, so no "Verified" badge is shown (a fake one creates liability).
-function verifiedBadgeHtml(isVerified){ return ''; }
+// Set only by the server after a Stripe Identity check (ID document + matching selfie, 18+).
+function verifiedBadgeHtml(isVerified){ return isVerified ? `<span class="verified">✓ ID verified</span>` : ''; }
+function isVerifiedAdult(){ return !!(state.tradeProfile && state.tradeProfile.idVerified); }
 function premiumBadgeHtml(isPremium){
   return isPremium ? `<span class="premiumbadge">★ Premium</span>` : '';
 }
 function guaranteeBanner(){
-  return `<div class="guarantee"><span class="gicon">🛡️</span><span class="gtext"><strong>Payment protection</strong> — when you pay through OnCall, the money is held and only released when you approve the job (or 24 hours after it's marked done with a photo). OnCall doesn't vet workers or insure jobs. <a href="#" data-opentos="safety" style="color:inherit;">Safety tips</a></span></div>`;
+  return `<div class="guarantee"><span class="gicon">🛡️</span><span class="gtext"><strong>Payment protection</strong> — when you pay through OnCall, the money is held and only released when you approve the job (or 24 hours after it's marked done with a photo). Everyone is ID-checked and 18+, but OnCall doesn't check skills or backgrounds, or insure jobs. <a href="#" data-opentos="safety" style="color:inherit;">Safety tips</a></span></div>`;
 }
 
 function heartIcon(filled){
@@ -879,6 +882,12 @@ function openJobDetail(taskId){
     toast("That's your own job post.");
     return;
   }
+  if(!isVerifiedAdult()){
+    toast('Verify your ID first — only verified adults (18+) can bid.');
+    state.tab='profile';
+    renderCurrentTab().then(()=>{ const c=document.getElementById('idCard'); if(c) c.scrollIntoView({behavior:'smooth'}); });
+    return;
+  }
   const myBid=t.bids.find(b=>b.workerId===session.user.id);
   if(myBid){
     toast('You already bid '+myBid.price+' on this job.');
@@ -952,6 +961,12 @@ function renderBrowse(){
 // ---------- post ----------
 function renderPost(){
   const app=document.getElementById('app');
+  if(state.tradeProfile && !isVerifiedAdult()){
+    app.innerHTML=`${guaranteeBanner()}${verifyGateHtml('post a job')}`;
+    document.getElementById('gateVerifyBtn').onclick=()=>{ state.tab='profile'; renderCurrentTab().then(()=>{ const c=document.getElementById('idCard'); if(c) c.scrollIntoView({behavior:'smooth'}); }); };
+    app.querySelectorAll('[data-opentos]').forEach(a=>a.onclick=(e)=>{ e.preventDefault(); openToS(a.dataset.opentos); });
+    return;
+  }
   app.innerHTML=`
     ${guaranteeBanner()}
     <div class="sub">Post a job</div>
@@ -1269,7 +1284,6 @@ function renderProfile(){
     `;
     mountSettings(document.getElementById('profileSettings'));
     document.getElementById('rRadius').oninput=e=>{document.getElementById('radiusVal').textContent=e.target.value+'km';};
-    const isVerified=false;
     let hasSample=false;
     document.getElementById('sampleBtn').onclick=e=>{
       hasSample=!hasSample;
@@ -1298,14 +1312,14 @@ function renderProfile(){
       const { error } = await sb.from('profiles').insert({
         id: session.user.id, name, trade,
         experience: document.getElementById('rExp').value.trim()||null,
-        skills: chosenSkills, has_sample: hasSample, verified: isVerified,
+        skills: chosenSkills, has_sample: hasSample,
         radius_km: parseInt(document.getElementById('rRadius').value,10),
         // Area already chosen on this device (before the profile existed) carries over.
         ...(state.area ? { area_lat: state.area.lat, area_lng: state.area.lng, area_label: state.area.label||null } : {}),
       });
       btn.textContent='Create profile'; btn.disabled=false;
       if(error){ toast('Could not create profile: '+error.message); return; }
-      toast('Profile created.');
+      toast('Profile created — next, verify your ID (below) so you can post and bid.');
       await loadMyProfile();
       renderProfile();
     };
@@ -1326,12 +1340,20 @@ function renderProfile(){
       <div class="tags" style="margin-top:8px;">${p.sample?`<span class="badge">Work sample attached</span>`:''}${premiumBadgeHtml(p.premium)}</div>
     </div>
 
+    ${idCardHtml()}
+
     <div class="sub">OnCall Premium</div>
     <div class="card" id="premiumCard"></div>
 
     <div id="profileSettings"></div>
   `;
   renderPremiumCard();
+  wireIdCard(app);
+  if(['pending','processing'].includes(p.idStatus) && (!state.idSyncedAt || Date.now()-state.idSyncedAt>30000)){
+    state.idSyncedAt=Date.now();
+    const before=p.idStatus;
+    refreshIdStatus().then(()=>{ if(state.tab==='profile' && state.tradeProfile && state.tradeProfile.idStatus!==before) renderProfile(); });
+  }
   mountSettings(document.getElementById('profileSettings'));
   // Refresh from Stripe in the background (renewal date, cancelled, lapsed) — at most once a minute.
   if(!state.premiumSyncedAt || Date.now()-state.premiumSyncedAt>60000){
@@ -1500,9 +1522,22 @@ async function acceptBidFlow(taskId, bidId, btn){
 // Runs once after Stripe sends the person back to the app.
 async function handleReturnFromStripe(){
   const p=new URLSearchParams(location.search);
-  if(!['paid','paycancel','connect','premium','premiumcancel','boosted','boostcancel'].some(k=>p.has(k))) return;
+  if(!['paid','paycancel','connect','premium','premiumcancel','boosted','boostcancel','idcheck'].some(k=>p.has(k))) return;
   history.replaceState(null,'',appBaseUrl());
   if(p.has('paycancel')){ state.tab='jobs'; state.jobsView='posted'; toast('Payment cancelled — the bid wasn\'t accepted.'); return; }
+  if(p.has('idcheck')){
+    state.tab='profile';
+    toast('Checking your ID…');
+    try{
+      const r=await callFn('sync_id_check'); await loadMyProfile();
+      toast(r.verified ? '✓ You\'re verified! You can now post jobs and bid.'
+        : r.status==='under_18' ? 'Sorry — OnCall is only for people aged 18 or over.'
+        : r.status==='processing' ? 'Submitted — Stripe is checking your ID. Usually a few minutes.'
+        : r.status==='failed' ? 'That didn\'t go through — see your Profile to try again.'
+        : 'Verification not finished — you can continue it on your Profile.');
+    }catch(e){ toast(e.message); }
+    return;
+  }
   if(p.has('boostcancel')){ state.tab='jobs'; state.jobsView='posted'; toast('No problem — you haven\'t been charged.'); return; }
   if(p.has('boosted')){
     state.tab='jobs'; state.jobsView='posted';
@@ -1580,6 +1615,46 @@ function tickAutoRelease(){
   });
 }
 setInterval(tickAutoRelease, 1000);
+
+// ---------- ID + age verification (Stripe Identity) ----------
+function idCardHtml(){
+  const p=state.tradeProfile; if(!p) return '';
+  if(p.idVerified) return '';
+  const st=p.idStatus;
+  if(st==='under_18') return `<div class="card" style="border-color:#E0475A;"><p class="card-title">OnCall is for adults only</p><div class="card-desc" style="margin-bottom:0;">Your ID shows you're under 18, so you can't post jobs or bid on OnCall. If this is a mistake, contact us.</div></div>`;
+  const body = st==='processing'
+    ? `<div class="card-desc">✓ Submitted — Stripe is checking your ID. This usually takes a few minutes.</div><button class="btn ghost" id="idCheckBtn">Check again</button>`
+    : `<div class="card-desc">${st==='failed' ? `<strong>That didn't go through:</strong> ${escapeHtml(p.idError||'please try again.')}<br><br>` : ''}
+        Everyone on OnCall is a verified adult (18+). It takes about 2 minutes: photograph your <strong>passport, driving licence or national ID card</strong>, then take a quick selfie. Stripe does the check — OnCall only learns whether you passed and are 18+.</div>
+       <button class="btn accent" id="idCheckBtn">${st==='failed'?'Try again':'Verify my ID'}</button>
+       <div class="hint" style="margin-top:8px;">Needed before you can post a job or bid. The selfie is compared with your ID photo (biometric data, processed by Stripe). Prefer not to use a selfie? Email us for another way. <a href="#" data-opentos="id" data-doc="privacy" style="color:inherit;">Privacy details</a></div>`;
+  return `<div class="card" id="idCard" style="border-color:var(--accent);"><div class="card-top"><div><p class="card-title">🪪 Verify your ID</p><p class="card-sub">Required · 18+ only</p></div></div>${body}</div>`;
+}
+function wireIdCard(root){
+  const btn=(root||document).querySelector('#idCheckBtn');
+  if(btn) btn.onclick=startIdCheck;
+  (root||document).querySelectorAll('#idCard [data-opentos]').forEach(a=>a.onclick=e=>{ e.preventDefault(); openToS(a.dataset.opentos, a.dataset.doc); });
+}
+async function startIdCheck(){
+  const btn=document.getElementById('idCheckBtn');
+  if(btn){ btn.disabled=true; btn.textContent='Opening…'; }
+  try{
+    const r=await callFn('start_id_check',{ returnUrl: appBaseUrl() });
+    if(r.url){ window.location.href=r.url; return; }
+    if(r.processing) toast('Stripe is still checking your ID — usually a few minutes.');
+    await refreshIdStatus();
+  }catch(e){ toast(e.message); }
+  if(btn){ btn.disabled=false; }
+  renderCurrentTab();
+}
+async function refreshIdStatus(){
+  try{ await callFn('sync_id_check'); }catch(e){}
+  await loadMyProfile();
+}
+// Shown instead of the Post form / bid sheet until the person is verified.
+function verifyGateHtml(action){
+  return `<div class="card"><p class="card-title">Verify your ID to ${action}</p><div class="card-desc">To keep everyone safe, only ID-verified adults (18+) can post jobs or bid. It takes about 2 minutes.</div><button class="btn accent" id="gateVerifyBtn">Verify my ID</button></div>`;
+}
 
 // ---------- Premium card (Profile page) ----------
 function fmtDate(d){ return d ? new Date(d).toLocaleDateString('en-IE',{day:'numeric',month:'short'}) : ''; }
@@ -1750,7 +1825,7 @@ document.getElementById('authSubmit').onclick=async ()=>{
   if(authMode==='signup'){
     if(!document.getElementById('authTerms').checked){ btn.disabled=false; msg.textContent='Please confirm you\'re 18+ and agree to the Terms to create an account.'; msg.style.display='block'; return; }
     btn.textContent='Creating account…';
-    const { error } = await sb.auth.signUp({ email, password, options:{ data:{ terms_version:'1.1', terms_accepted_at:new Date().toISOString() } } });
+    const { error } = await sb.auth.signUp({ email, password, options:{ data:{ terms_version:'1.2', terms_accepted_at:new Date().toISOString() } } });
     btn.disabled=false;
     if(error){ btn.textContent='Create account'; msg.textContent=error.message; msg.style.display='block'; return; }
     msg.textContent='Account created — check your email to confirm it, then log in here.';

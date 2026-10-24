@@ -23,7 +23,7 @@
 <body>
 <main>
 <h1>Privacy Policy</h1>
-<p class="meta">Version 1.1 · Last updated 24 October 2026</p>
+<p class="meta">Version 1.2 · Last updated 24 October 2026</p>
 
 <div class="draft"><strong>Draft.</strong> This policy is a working draft prepared for review by a solicitor before OnCall launches to the public. Items <span class="ph">highlighted like this</span> still need to be filled in.</div>
 
@@ -38,6 +38,7 @@
   <li><strong>Profile:</strong> name, what you're good at, experience, job types, travel distance, rating, whether you have Premium.</li>
   <li><strong>Jobs and bids:</strong> job title, category, description, budget, area/location you type in, photos or videos you add, bids, prices and notes, and the "job done" photo.</li>
   <li><strong>Location:</strong> the approximate location of each job you post, and the centre and distance of the area you search in, both saved only to about 1 km (2 decimal places), plus the area name you choose. If you tap "Use my current location", your device shares its location with the app once to centre the map; we only keep the rounded result.</li>
+  <li><strong>ID and age check result:</strong> whether you passed our identity check, whether you are 18 or over, the date, and Stripe's reference for the check (see section 3a). We do <strong>not</strong> store your date of birth, ID number or any images.</li>
   <li><strong>Messages</strong> you send to other users through OnCall.</li>
   <li><strong>Ratings and reviews</strong>, reports of problems or illegal content, and dispute notes.</li>
   <li><strong>Payments:</strong> amounts, fees, payment status and references from Stripe. We do <strong>not</strong> receive or store full card numbers.</li>
@@ -54,13 +55,24 @@
   <tr><td>Keeping accounting and tax records; reporting Workers' earnings to Revenue under DAC7; responding to lawful requests from authorities; handling reports of illegal content</td><td>Legal obligation (6(1)(c))</td></tr>
   <tr><td>Keeping OnCall safe and secure, preventing fraud and misuse, resolving disputes, enforcing our terms, defending legal claims, and improving the service</td><td>Our legitimate interests (6(1)(f)) — running a safe, working marketplace. You can object (see section 7).</td></tr>
 </table></div>
-<p>We don't send marketing emails, sell your data or use it for advertising. We don't make decisions about you that have legal or similarly significant effects based solely on automated processing.</p>
+<p>We don't send marketing emails, sell your data or use it for advertising.</p>
+
+<h2 id="id">3a. ID and age verification</h2>
+<p>Everyone must verify their identity and age (18+) before posting a job or bidding. We use <strong>Stripe Identity</strong>, provided by Stripe Payments Europe, Limited, to do this. When you verify, Stripe collects a photo of your ID document (passport, driving licence or national ID card), a live selfie, and the information on the document (such as name, date of birth, document number and expiry). Stripe compares your selfie with the photo on the document — this uses <strong>biometric data</strong>, a special category of personal data.</p>
+<ul>
+  <li><strong>Why:</strong> to keep users safe (people let Workers into their homes) and to make sure everyone is an adult.</li>
+  <li><strong>Legal basis:</strong> performing our contract with you and our legitimate interest in a safe marketplace (Art. 6(1)(b) and (f)); for the selfie comparison, your <strong>explicit consent</strong> (Art. 9(2)(a)), which Stripe asks for before the check. You can refuse — email us and we'll offer another way to verify, reviewed by a person.</li>
+  <li><strong>What we receive and keep:</strong> only whether you passed, whether you're 18+, the date, and the check's reference. We look at your date of birth once, at the moment of the check, to work out whether you're 18+, and don't store it.</li>
+  <li><strong>Automated decision:</strong> the check is automated. If it fails or says you're under 18, you can't post or bid until it's resolved. You can ask for a person at OnCall to review the decision, explain your point of view, and contest it.</li>
+  <li><strong>Stripe's role:</strong> Stripe keeps the images and data under <a href="https://stripe.com/privacy" target="_blank" rel="noopener">its privacy policy</a> and may, if you agree in its flow, use your data to improve its verification technology. If you ask us to delete your data, we ask Stripe to delete ("redact") your verification; you can also contact Stripe support directly.</li>
+</ul>
+<p>Apart from the ID check above, we don't make decisions about you that have legal or similarly significant effects based solely on automated processing.</p>
 
 <h2 id="who">4. Who we share it with</h2>
 <ul>
   <li><strong>Other users:</strong> your name, profile, rating, area name and job posts (with their approximate location and distance) are visible to signed-in users; your bids are visible to the Poster; messages go to the person you send them to.</li>
   <li><strong>Supabase</strong> — hosts our database, logins, files and server code. Your data is stored in the EU (Ireland region). Processor.</li>
-  <li><strong>Stripe Payments Europe, Limited</strong> (Dublin) — payments, subscriptions and Worker payouts. For its own identity checks and legal duties Stripe acts as a separate controller under <a href="https://stripe.com/privacy" target="_blank" rel="noopener">its privacy policy</a>.</li>
+  <li><strong>Stripe Payments Europe, Limited</strong> (Dublin) — payments, subscriptions, Worker payouts and ID/age verification (Stripe Identity). For its own identity checks and legal duties Stripe acts as a separate controller under <a href="https://stripe.com/privacy" target="_blank" rel="noopener">its privacy policy</a>.</li>
   <li><strong>Resend</strong> — sends our emails. Processor; may process data in the United States.</li>
   <li><strong>OpenStreetMap Foundation</strong> (UK) — provides the map and place search. When you open the map or search for a place, your IP address, the place you type and the map area you view are sent to OpenStreetMap's servers. The UK has an EU adequacy decision.</li>
   <li><strong>GitHub</strong> (hosts the app's web page) and <strong>jsDelivr</strong> (delivers a code library the app uses) — receive your IP address and browser details when the app loads. May process data in the United States.</li>
