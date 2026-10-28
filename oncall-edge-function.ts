@@ -115,6 +115,8 @@ Deno.serve(async (req: Request) => {
         return await startIdCheck(caller, body);
       case "sync_id_check":
         return json(await syncIdCheck(caller.id));
+      case "delete_account":
+        return await deleteAccount(caller, body);
       default:
         return json({ error: "Unknown action." }, 400);
     }
@@ -743,6 +745,116 @@ async function syncIdCheck(userId: string) {
   if (Object.keys(update).length) await db.from("profiles").update(update).eq("id", userId);
   const status = (update.id_status as string) ?? profile.id_status;
   return { status, verified: status === "verified", error: (update.id_error as string) ?? null };
+}
+
+// ---------- 7f. Delete my account (Apple App Store guideline 5.1.1(v)) ----------
+// Deletes the login and personal data. Finished jobs, payments, reviews, reports
+// and disputes must be kept (Privacy Policy section 6), so where they exist the
+// profile stays as an anonymous "Deleted user" instead of being removed.
+const DELETED_NAME = "Deleted user";
+
+async function deleteAccount(caller: any, body: any) {
+  if (body.confirm !== "DELETE") return json({ error: "Type DELETE to confirm." }, 400);
+  const uid = caller.id;
+  const { data: profile } = await db.from("profiles").select("*").eq("id", uid).maybeSingle();
+
+  // 1. Not while money is moving: jobs in progress (either side) or a payout still owed.
+  const { data: myTasks } = await db.from("tasks").select("id, accepted_bid_id, completed, disputed, media_url").eq("poster_id", uid);
+  const { data: myBids } = await db.from("bids").select("id, task_id").eq("worker_id", uid);
+  const myBidIds = (myBids ?? []).map((b) => b.id);
+  const { data: wonTasks } = myBidIds.length
+    ? await db.from("tasks").select("id, completed, disputed, completion_photo_url").in("accepted_bid_id", myBidIds)
+    : { data: [] as any[] };
+  const busy = [...(myTasks ?? []).filter((t) => t.accepted_bid_id && !t.completed), ...(wonTasks ?? []).filter((t) => !t.completed)];
+  if (busy.length) {
+    return json({ error: "You have a job in progress. Finish it (or wait for the dispute to be sorted) before deleting your account." }, 400);
+  }
+  if ((wonTasks ?? []).length) {
+    const { data: owed } = await db.from("payments").select("task_id").in("task_id", wonTasks!.map((t) => t.id))
+      .eq("status", "released").is("payout_transfer_id", null);
+    if ((owed ?? []).length) {
+      return json({ error: "Some job money is still waiting to be paid to you. Finish Profile → Getting paid first, or contact us so we can sort it out." }, 400);
+    }
+  }
+
+  // 2. Stripe: stop Premium now (no more charges) and ask Stripe to delete the ID check.
+  if (profile?.stripe_customer_id) {
+    const subs = await stripe.subscriptions.list({ customer: profile.stripe_customer_id, status: "all", limit: 20 });
+    for (const s of subs.data) {
+      if (s.metadata?.oncall === "premium" && !["canceled", "incomplete_expired"].includes(s.status)) {
+        await stripe.subscriptions.cancel(s.id);
+      }
+    }
+  }
+  if (profile?.id_session_id) {
+    try { await stripe.identity.verificationSessions.redact(profile.id_session_id); }
+    catch (e) { console.error("identity redact", e); }
+  }
+
+  // 3. Open jobs (no worker yet) go, with their bids and messages. Reports about them are kept.
+  const openTaskIds = (myTasks ?? []).filter((t) => !t.accepted_bid_id).map((t) => t.id);
+  if (openTaskIds.length) {
+    await db.from("reports").update({ task_id: null }).in("task_id", openTaskIds);
+    const { error } = await db.from("tasks").delete().in("id", openTaskIds);
+    if (error) throw error;
+  }
+  // My bids that weren't accepted.
+  const wonBidIds = new Set<string>();
+  if (myBidIds.length) {
+    const { data: acc } = await db.from("tasks").select("accepted_bid_id").in("accepted_bid_id", myBidIds);
+    (acc ?? []).forEach((t) => wonBidIds.add(t.accepted_bid_id));
+    const losing = myBidIds.filter((id) => !wonBidIds.has(id));
+    if (losing.length) await db.from("bids").delete().in("id", losing);
+  }
+
+  // 4. Messages and photos — except on disputed jobs, which are kept as evidence.
+  const keptTasks = [...(myTasks ?? []).filter((t) => t.accepted_bid_id), ...(wonTasks ?? [])];
+  const disputedIds = new Set(keptTasks.filter((t) => t.disputed).map((t) => t.id));
+  const { data: msgs } = await db.from("messages").select("id, task_id").or(`sender_id.eq.${uid},recipient_id.eq.${uid}`);
+  const msgIds = (msgs ?? []).filter((m) => !disputedIds.has(m.task_id)).map((m) => m.id);
+  for (let i = 0; i < msgIds.length; i += 200) {
+    await db.from("messages").delete().in("id", msgIds.slice(i, i + 200));
+  }
+  const keepUrls = new Set<string>();
+  for (const t of keptTasks) {
+    if (!disputedIds.has(t.id)) continue;
+    if (t.media_url) keepUrls.add(t.media_url);
+    if (t.completion_photo_url) keepUrls.add(t.completion_photo_url);
+  }
+  const paths: string[] = [];
+  for (const folder of [`${uid}/jobs`, `${uid}/done`, uid]) {
+    const { data: files } = await db.storage.from("media").list(folder, { limit: 1000 });
+    for (const f of files ?? []) if (f.id) paths.push(`${folder}/${f.name}`);
+  }
+  const removePaths = paths.filter((p) => ![...keepUrls].some((u) => u.endsWith("/media/" + p)));
+  for (let i = 0; i < removePaths.length; i += 100) {
+    await db.storage.from("media").remove(removePaths.slice(i, i + 100));
+  }
+  const notDisputedPosted = (myTasks ?? []).filter((t) => t.accepted_bid_id && !t.disputed).map((t) => t.id);
+  if (notDisputedPosted.length) await db.from("tasks").update({ media_url: null, media_type: null }).in("id", notDisputedPosted);
+  const notDisputedWon = (wonTasks ?? []).filter((t) => !t.disputed).map((t) => t.id);
+  if (notDisputedWon.length) await db.from("tasks").update({ completion_photo_url: null }).in("id", notDisputedWon);
+
+  // 5. Blocks, then the profile itself (or an anonymous placeholder if records must stay).
+  await db.from("blocks").delete().or(`blocker_id.eq.${uid},blocked_id.eq.${uid}`);
+  if (profile) {
+    const { error: delErr } = await db.from("profiles").delete().eq("id", uid);
+    if (delErr) {
+      const { error } = await db.from("profiles").update({
+        name: DELETED_NAME, trade: null, experience: null, skills: [], has_sample: false,
+        area_lat: null, area_lng: null, area_label: null,
+        premium: false, premium_until: null, stripe_customer_id: null, stripe_connect_account_id: null,
+        verified: false, id_status: "none", id_session_id: null, id_verified_at: null, id_error: null,
+        deleted_at: new Date().toISOString(),
+      }).eq("id", uid);
+      if (error) throw error;
+    }
+  }
+
+  // 6. The login (email + password) — last, so a failure above can simply be retried.
+  const { error: authErr } = await db.auth.admin.deleteUser(uid);
+  if (authErr) throw authErr;
+  return json({ ok: true });
 }
 
 // ---------- 8a. Reminder email to the poster ~4 hours before auto-release ----------
