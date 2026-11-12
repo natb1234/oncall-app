@@ -22,7 +22,7 @@ A small same-day task marketplace (Ireland, EUR). Posters post small jobs, worke
 
 ## Domain + email (set up 12 Nov 2026)
 - Domain **oncallapp.ie** registered at Blacknight; the registrant is an adult family member, not the founder. The live Stripe account, the operator named in terms.html/privacy.html and other legal/money accounts must also be held by an adult before launch — ask the user, don't guess names.
-- Nameservers moved to Cloudflare (`liberty.ns.cloudflare.com`, `otto.ns.cloudflare.com`), zone active. Cloudflare Email Routing: `hello@oncallapp.ie` → `oncall.help@gmail.com` (the OnCall inbox; reports@/catch-all may also exist — check Cloudflare). Receive only; nothing sends from the domain yet.
+- Nameservers moved to Cloudflare (`liberty.ns.cloudflare.com`, `otto.ns.cloudflare.com`), zone active. Cloudflare Email Routing: `hello@oncallapp.ie` → `oncallapp.help@gmail.com` (the OnCall inbox; reports@/catch-all may also exist — check Cloudflare). Receive only; nothing sends from the domain yet.
 - Terms/Privacy contact email = hello@oncallapp.ie.
 - Next: add oncallapp.ie in Resend (put its DNS records in Cloudflare), then set `EMAIL_FROM` and `REPORTS_EMAIL`. Until Resend has the domain it only delivers to the Resend account owner's address, so leave `REPORTS_EMAIL` as is until then.
 - The Cloudflare connector in Claude sessions so far can't edit DNS/Email Routing; the user does it in the dashboard (or adds the main Cloudflare connector, mcp.cloudflare.com).
