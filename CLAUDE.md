@@ -20,6 +20,13 @@ A small same-day task marketplace (Ireland, EUR). Posters post small jobs, worke
 - **Email:** Resend, key in Edge Function secret `RESEND_API_KEY`. No custom domain yet, so emails only reach the account owner (natbooth252@gmail.com).
 - **Timer:** pg_cron job `oncall-auto-release` every 15 min → POSTs `{"action":"auto_release_sweep"}` to the function with header `x-cron-secret` (stored in Vault as `oncall_cron_secret`). The sweep sends the 4-hours-left reminder email, auto-releases jobs past `auto_release_at`, then pays any worker whose job money is still waiting (see Payouts).
 
+## Domain + email (set up 12 Nov 2026)
+- Domain **oncallapp.ie** registered at Blacknight; the registrant is an adult family member, not the founder. The live Stripe account, the operator named in terms.html/privacy.html and other legal/money accounts must also be held by an adult before launch — ask the user, don't guess names.
+- Nameservers moved to Cloudflare (`liberty.ns.cloudflare.com`, `otto.ns.cloudflare.com`), zone active. Cloudflare Email Routing: `hello@oncallapp.ie` → `oncall.help@gmail.com` (the OnCall inbox; reports@/catch-all may also exist — check Cloudflare). Receive only; nothing sends from the domain yet.
+- Terms/Privacy contact email = hello@oncallapp.ie.
+- Next: add oncallapp.ie in Resend (put its DNS records in Cloudflare), then set `EMAIL_FROM` and `REPORTS_EMAIL`. Until Resend has the domain it only delivers to the Resend account owner's address, so leave `REPORTS_EMAIL` as is until then.
+- The Cloudflare connector in Claude sessions so far can't edit DNS/Email Routing; the user does it in the dashboard (or adds the main Cloudflare connector, mcp.cloudflare.com).
+
 ## Payouts
 On release the server captures the payment and, if the worker's Stripe Connect account has `transfers` active, transfers amount minus 10% (recorded in `payments.payout_transfer_id` / `paid_out_at`). If not, the money waits in the platform balance; it's sent automatically when the worker finishes "Getting paid" setup (`sync_connect_status`) or on the next 15-min timer run. Stripe idempotency key `oncall-payout-<taskId>` prevents double payment.
 
@@ -68,8 +75,8 @@ Clean-up done 19 Oct: test task, `public.site_pages` table and Storage bucket `s
 Test accounts: `natbooth252@gmail.com` (poster) and `natbooth252+worker@gmail.com` (worker, name "Nay").
 
 ## To-do, most important first
-1. **Domain** for Resend so reminder emails reach real users; then set `EMAIL_FROM`.
-2. Fill the yellow placeholders in terms.html / privacy.html (name, address, contact email once the domain exists, VAT if registered).
+1. **Resend domain**: add oncallapp.ie in Resend so reminder emails reach real users; then set `EMAIL_FROM` and `REPORTS_EMAIL`.
+2. Fill the yellow placeholders in terms.html / privacy.html (operator's legal name — an adult — business address, VAT if registered). Contact email done.
 3. Before launch (legal/business, outside the code): solicitor review of terms.html + privacy.html; consider forming a Ltd company; public liability insurance for OnCall; register with Revenue as a DAC7 reporting platform operator and collect workers' tax numbers (PPSN/TIN) + date of birth + address before payouts; accept Supabase's and Resend's data processing agreements; ask workers whether they act as a business ("trader") and show that to posters; check reports in Supabase → reports and reply to reporters.
 4. Before launch (code): switch the map tiles and place search from free OpenStreetMap servers to a paid provider (usage policy); switch Stripe to live keys; card holds expire after ~7 days — handle jobs not finished in time (re-authorise or cancel); in-app account deletion (also an App Store requirement); a manual verification route for people who can't use the online ID check; block users (App Store); Stripe webhook so a paid Boost is applied even if the poster never returns.
 
