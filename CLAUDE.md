@@ -12,7 +12,7 @@ A small same-day task marketplace (Ireland, EUR). Posters post small jobs, worke
 
 ## Where everything lives
 - **App (frontend):** single file `index.html` (identical copy `oncall-mvp.html`) in this repo, served by GitHub Pages:
-  `https://natb1234.github.io/oncall-app/`  — plain HTML + JS, Supabase JS from CDN. Keep both files identical.
+  **`https://oncallapp.ie/`** (custom domain since 12 Nov 2026 via the `CNAME` file; the old `https://natb1234.github.io/oncall-app/` redirects there) — plain HTML + JS, Supabase JS from CDN. Keep both files identical.
 - **Backend:** Supabase project ref `vwezewdobyyqrbflllmg` (eu-west-1), URL `https://vwezewdobyyqrbflllmg.supabase.co`. Publishable key is in `index.html` (safe to be public).
 - **Payments function:** Supabase Edge Function `oncall` — source in `oncall-edge-function.ts` (repo root). Deployed with **verify_jwt = false** on purpose (the cron timer has no user login); every user action checks the login token itself via `getCaller`, the timer checks a Vault secret via `check_cron_secret()`.
 - **Database schema:** `oncall-schema.sql` (original), then `oncall-stage1-migration.sql`, `oncall-site-bucket.sql`, `oncall-timer-and-reminders.sql`, `oncall-payouts-and-premium.sql`, `oncall-legal-and-reports.sql`, `oncall-travel-zone.sql`, `oncall-id-verification.sql` (all in repo root, applied in that order). RLS is on everywhere; clients cannot update money/lifecycle columns — only the Edge Function (service_role) can.
@@ -24,7 +24,8 @@ A small same-day task marketplace (Ireland, EUR). Posters post small jobs, worke
 - Domain **oncallapp.ie** registered at Blacknight; the registrant is an adult family member, not the founder. The live Stripe account, the operator named in terms.html/privacy.html and other legal/money accounts must also be held by an adult before launch — ask the user, don't guess names.
 - Nameservers moved to Cloudflare (`liberty.ns.cloudflare.com`, `otto.ns.cloudflare.com`), zone active. Cloudflare Email Routing: `hello@oncallapp.ie` → `oncallapp.help@gmail.com` (the OnCall inbox; reports@/catch-all may also exist — check Cloudflare). Receive only; nothing sends from the domain yet.
 - Terms/Privacy contact email = hello@oncallapp.ie.
-- Next: add oncallapp.ie in Resend (put its DNS records in Cloudflare), then set `EMAIL_FROM` and `REPORTS_EMAIL`. Until Resend has the domain it only delivers to the Resend account owner's address, so leave `REPORTS_EMAIL` as is until then.
+- Resend: oncallapp.ie verified (Ireland region, auto-configured via Cloudflare). Function secrets `EMAIL_FROM` = `OnCall <noreply@oncallapp.ie>`, `REPORTS_EMAIL` = `hello@oncallapp.ie` (entered by the user in the dashboard).
+- Website: Cloudflare DNS has 4 A records for `@` (185.199.108–111.153) + CNAME `www` → natb1234.github.io, all **DNS only** (grey cloud, so GitHub can issue the HTTPS certificate). Function v19 accepts return URLs from oncallapp.ie, www.oncallapp.ie and the old github.io address; reminder email links and the Stripe Connect business URL point to oncallapp.ie. Still to do by the user: GitHub → Settings → Pages → Enforce HTTPS; Supabase → Authentication → URL Configuration → Site URL `https://oncallapp.ie` + redirect URL `https://oncallapp.ie/**`.
 - The Cloudflare connector in Claude sessions so far can't edit DNS/Email Routing; the user does it in the dashboard (or adds the main Cloudflare connector, mcp.cloudflare.com).
 
 ## Payouts
@@ -75,7 +76,7 @@ Clean-up done 19 Oct: test task, `public.site_pages` table and Storage bucket `s
 Test accounts: `natbooth252@gmail.com` (poster) and `natbooth252+worker@gmail.com` (worker, name "Nay").
 
 ## To-do, most important first
-1. **Resend domain**: add oncallapp.ie in Resend so reminder emails reach real users; then set `EMAIL_FROM` and `REPORTS_EMAIL`.
+1. **Unmerged work:** branch `claude/sharp-thompson-ze053i` (28 Oct) adds delete account, block users and a support page to the app (index.html, oncall-mvp.html, support.html, privacy.html, oncall-app-store.sql, APP-STORE.md). Its function code IS deployed (and is in this repo's oncall-edge-function.ts since 12 Nov), but the app pages were never merged to main — check with the user, confirm the SQL was applied, then merge.
 2. Fill the yellow placeholders in terms.html / privacy.html (operator's legal name — an adult — business address, VAT if registered). Contact email done.
 3. Before launch (legal/business, outside the code): solicitor review of terms.html + privacy.html; consider forming a Ltd company; public liability insurance for OnCall; register with Revenue as a DAC7 reporting platform operator and collect workers' tax numbers (PPSN/TIN) + date of birth + address before payouts; accept Supabase's and Resend's data processing agreements; ask workers whether they act as a business ("trader") and show that to posters; check reports in Supabase → reports and reply to reporters.
 4. Before launch (code): switch the map tiles and place search from free OpenStreetMap servers to a paid provider (usage policy); switch Stripe to live keys; card holds expire after ~7 days — handle jobs not finished in time (re-authorise or cancel); in-app account deletion (also an App Store requirement); a manual verification route for people who can't use the online ID check; block users (App Store); Stripe webhook so a paid Boost is applied even if the poster never returns.
