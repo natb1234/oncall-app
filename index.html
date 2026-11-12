@@ -236,7 +236,7 @@
 
 <div class="overlay" id="overlay">
   <div class="modal">
-    <div class="modal-head"><h3 id="modalTitle">Thread</h3><div style="display:flex;gap:6px;align-items:center;"><button class="msgbtn small" id="threadReport" style="color:var(--ink-faint);">⚑ Report</button><button class="modal-close" id="modalClose">✕</button></div></div>
+    <div class="modal-head"><h3 id="modalTitle">Thread</h3><div style="display:flex;gap:6px;align-items:center;"><button class="msgbtn small" id="threadReport" style="color:var(--ink-faint);">⚑ Report</button><button class="msgbtn small" id="threadBlock" style="color:var(--ink-faint);">⊘ Block</button><button class="modal-close" id="modalClose">✕</button></div></div>
     <div class="modal-body" id="modalBody"></div>
     <div class="modal-foot">
       <input id="modalInput" placeholder="Type a message…" />
@@ -319,11 +319,17 @@
 
       <div class="sub">Legal</div>
       <button class="msgbtn" style="width:100%;margin-bottom:8px;" id="setTosBtn">Terms of Service</button>
-      <button class="msgbtn" style="width:100%;" id="setPrivacyBtn">Privacy Policy</button>
-      <div class="hint" style="margin-top:8px;">To close your account or get a copy of your data, email us — details in the Privacy Policy.</div>
+      <button class="msgbtn" style="width:100%;margin-bottom:8px;" id="setPrivacyBtn">Privacy Policy</button>
+      <a class="msgbtn" style="display:block;width:100%;text-align:center;text-decoration:none;box-sizing:border-box;" href="support.html" target="_blank">Help &amp; support</a>
+      <div class="hint" style="margin-top:8px;">To get a copy of your data, email us — details in the Privacy Policy.</div>
+
+      <div class="sub">Blocked people</div>
+      <div id="setBlockedList" class="hint" style="margin-top:-6px;">You haven't blocked anyone.</div>
 
       <div class="sub">Account</div>
       <button class="msgbtn" style="width:100%;color:#B3261E;" id="setLogoutBtn">Log out</button>
+      <button class="msgbtn" style="width:100%;margin-top:8px;color:#B3261E;" id="setDeleteBtn">Delete my account</button>
+      <div class="hint" style="margin-top:6px;">Permanently deletes your login, profile, open jobs, bids, messages and photos. Premium stops straight away. Records of finished jobs and payments are kept anonymously as the law requires.</div>
 
       <div class="hint" style="margin-top:18px;">OnCall MVP Prototype — notification switches are for demo purposes only.</div>
     </div>
@@ -377,7 +383,7 @@
     <div class="modal-foot">
       <button class="btn small accent" id="bidSubmit" style="flex:1;">Send bid</button>
     </div>
-    <div style="padding:0 18px 14px;"><button class="msgbtn small" id="bidReport" style="color:var(--ink-faint);">⚑ Report this job</button></div>
+    <div style="padding:0 18px 14px;display:flex;gap:6px;"><button class="msgbtn small" id="bidReport" style="color:var(--ink-faint);">⚑ Report this job</button><button class="msgbtn small" id="bidBlock" style="color:var(--ink-faint);">⊘ Block this person</button></div>
   </div>
 </div>
 
@@ -431,6 +437,29 @@ async function callFn(action, params){
   return out;
 }
 function appBaseUrl(){ return location.origin + location.pathname; }
+
+// Inside the iPhone app (App Store build), Apple requires its own in-app purchase for
+// digital extras (Premium, Boost), so those buttons are hidden there. Job payments are
+// real-world services, which Apple allows through Stripe.
+const IN_IOS_APP = /OnCallApp/.test(navigator.userAgent) ||
+  !!(window.Capacitor && typeof window.Capacitor.getPlatform==='function' && window.Capacitor.getPlatform()==='ios');
+
+// ---------- blocking (people you blocked are hidden, and can't bid on your jobs or message you) ----------
+async function loadBlocks(){
+  const { data } = await sb.from('blocks').select('blocked_id, who:profiles!blocks_blocked_id_fkey(name)').eq('blocker_id', session.user.id);
+  state.blockedList = (data||[]).map(r=>({ id:r.blocked_id, name: escapeHtml(r.who && r.who.name || 'Someone') }));
+  state.blocked = new Set(state.blockedList.map(b=>b.id));
+}
+function isBlocked(id){ return !!(state.blocked && state.blocked.has(id)); }
+async function blockUser(userId, name){
+  if(!userId || userId===session.user.id) return false;
+  if(!confirm(`Block ${name||'this person'}? You won't see their jobs, bids or messages, and they can't bid on your jobs or message you. You can unblock them in Profile.`)) return false;
+  const { error } = await sb.from('blocks').insert({ blocker_id: session.user.id, blocked_id: userId });
+  if(error && error.code!=='23505'){ toast('Could not block: '+error.message); return false; }
+  await loadBlocks();
+  toast(`${name||'They'} ${name?'is':'are'} blocked. If they broke the rules, please also tap Report.`);
+  return true;
+}
 
 function escapeHtml(str){
   return String(str==null?'':str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -638,11 +667,13 @@ document.getElementById('areaApply').onclick=async ()=>{
 async function loadHomeTasks(){
   const { data, error } = await sb.from('tasks').select(TASK_SELECT).is('accepted_bid_id', null).eq('completed', false).order('created_at',{ascending:false});
   if(error){ toast('Could not load jobs: '+error.message); state.tasks=[]; return; }
-  state.tasks = (data||[]).map(mapTaskRow);
+  state.tasks = (data||[]).map(mapTaskRow).filter(t=>!isBlocked(t.posterId));
 }
 async function loadMyPostedTasks(){
   const { data, error } = await sb.from('tasks').select(TASK_SELECT).eq('poster_id', session.user.id).order('created_at',{ascending:false});
   state.myPostedTasks = error ? [] : (data||[]).map(mapTaskRow);
+  // Hide bids from blocked people (an accepted one stays, so a job in progress can finish).
+  state.myPostedTasks.forEach(t=>{ t.bids=t.bids.filter(b=>b.id===t.accepted || !isBlocked(b.workerId)); });
   // The fee actually charged on accepted jobs (6% or 10%, fixed when the bid was accepted).
   const acceptedIds=state.myPostedTasks.filter(t=>t.accepted).map(t=>t.id);
   if(acceptedIds.length){
@@ -677,7 +708,7 @@ async function loadMyBids(){
 async function loadSavedTasksData(){
   if(state.saved.length===0){ state.savedTasksData=[]; return; }
   const { data, error } = await sb.from('tasks').select(TASK_SELECT).in('id', state.saved);
-  state.savedTasksData = error ? [] : (data||[]).map(mapTaskRow);
+  state.savedTasksData = error ? [] : (data||[]).map(mapTaskRow).filter(t=>!isBlocked(t.posterId));
 }
 async function loadInboxThreads(){
   await Promise.all([loadMyPostedTasks(), loadMyBids()]);
@@ -688,7 +719,7 @@ async function loadInboxThreads(){
   (state.myBids||[]).forEach(({task:t})=>{
     threads.push({ taskId:t.id, counterpartId:t.posterId, name:t.poster, context:t.title });
   });
-  const withPreview = await Promise.all(threads.map(async th=>{
+  const withPreview = await Promise.all(threads.filter(th=>!isBlocked(th.counterpartId)).map(async th=>{
     const { data } = await sb.from('messages').select('body,sender_id,created_at')
       .eq('task_id', th.taskId)
       .or(`and(sender_id.eq.${session.user.id},recipient_id.eq.${th.counterpartId}),and(sender_id.eq.${th.counterpartId},recipient_id.eq.${session.user.id})`)
@@ -926,7 +957,7 @@ async function submitBid(){
   const t=state.pendingBidTask;
   state.pendingBidTaskId=null; state.pendingBidTask=null;
   if(error){
-    toast(error.code==='23505' ? "You've already bid on this job." : (error.code==='23503' ? 'Set up your profile first (tap Profile below).' : 'Could not send bid.'));
+    toast(error.code==='42501' ? "You can't bid on this job." : error.code==='23505' ? "You've already bid on this job." : (error.code==='23503' ? 'Set up your profile first (tap Profile below).' : 'Could not send bid.'));
     return;
   }
   toast('Bid sent'+(t?' to '+t.poster:'')+'.');
@@ -1148,6 +1179,7 @@ function renderPostedList(mineList, mine){
       `:`
         ${t.featuredUntil
           ? `<div class="paybox held" style="margin-bottom:10px;"><div class="paybox-top held-text">⚡ Featured on Home</div><div class="paybox-sub">Pinned at the top until ${fmtDateTime(t.featuredUntil)}.</div></div>`
+          : IN_IOS_APP ? ''
           : `<button class="btn ghost" style="margin-bottom:6px;" data-boost="${t.id}">⚡ Boost this job — ${BOOST_PRICE}</button>
              <div class="hint" style="margin:0 0 12px;">Pins it at the top of Home for 48 hours so it gets bids faster (shown as a paid placement). Starts straight away; once the 48 hours are used you can't cancel it for a refund. Premium members' jobs are featured free.</div>`}
         <div class="paynote">Keep payment in the app — cash or bank transfers lose the payment hold and our dispute help.</div>
@@ -1436,6 +1468,18 @@ async function reportSomething(payload, what){
   catch(e){ toast(e.message); }
 }
 document.getElementById('bidReport').onclick=()=>{ if(state.pendingBidTaskId) reportSomething({kind:'task', taskId:state.pendingBidTaskId}, 'job'); };
+document.getElementById('threadBlock').onclick=async ()=>{
+  const ov=document.getElementById('overlay');
+  if(await blockUser(ov.dataset.counterpartId, document.getElementById('modalTitle').textContent)){
+    ov.classList.remove('show'); renderCurrentTab();
+  }
+};
+document.getElementById('bidBlock').onclick=async ()=>{
+  const t=state.pendingBidTask;
+  if(!t) return;
+  if(t.posterId===session.user.id){ toast("That's your own job."); return; }
+  if(await blockUser(t.posterId, t.poster)){ closeBidModal(); renderCurrentTab(); }
+};
 document.getElementById('threadReport').onclick=()=>{
   const ov=document.getElementById('overlay');
   reportSomething({kind:'user', taskId:ov.dataset.taskId, userId:ov.dataset.counterpartId}, 'person or their messages');
@@ -1471,7 +1515,7 @@ async function sendMsg(){
   if(!text)return;
   inp.value='';
   const { error } = await sb.from('messages').insert({task_id:taskId, sender_id:session.user.id, recipient_id:counterpartId, body:text});
-  if(error){ toast('Could not send: '+error.message); return; }
+  if(error){ toast(error.code==='42501' ? "You can't message this person." : 'Could not send: '+error.message); return; }
   await loadAndRenderThread(taskId, counterpartId);
 }
 
@@ -1666,6 +1710,10 @@ function renderPremiumCard(){
   const active = st ? st.active : state.tradeProfile.premium;
   const until = (st && st.premiumUntil) || state.tradeProfile.premiumUntil;
   const cancelling = !!(st && st.cancelling);
+  if(IN_IOS_APP && !active){
+    card.innerHTML=`<div class="card-top"><div><p class="card-title">★ Premium</p></div><span class="badge muted">Not active</span></div><div class="card-desc">Premium isn't available in the iPhone app yet.</div>`;
+    return;
+  }
   card.innerHTML=`
     <div class="card-top">
       <div><p class="card-title">★ Premium</p><p class="card-sub">${PREMIUM_PRICE}/month · cancel anytime</p></div>
@@ -1710,10 +1758,23 @@ function mountSettings(container){
   // Look up inside settingsBody: it may be detached from the page while the Profile redraws.
   settingsBody.querySelector('#setPush').checked = state.settings.pushNotif;
   settingsBody.querySelector('#setEmail').checked = state.settings.emailNotif;
+  renderBlockedList();
   callFn('sync_connect_status').then(r=>{
     settingsBody.querySelector('#setPayoutStatus').textContent = r.ready ? '✓ Payout account connected.' : 'Connect a payout account so job money reaches you.';
     settingsBody.querySelector('#setPayoutBtn').textContent = r.ready ? 'Update' : 'Set up';
   }).catch(()=>{});
+}
+function renderBlockedList(){
+  const el=settingsBody.querySelector('#setBlockedList');
+  const list=state.blockedList||[];
+  if(!list.length){ el.innerHTML="You haven't blocked anyone."; return; }
+  el.innerHTML=list.map(b=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;"><span style="font-size:13px;color:var(--ink);">${b.name}</span><button class="msgbtn small" data-unblock="${b.id}">Unblock</button></div>`).join('');
+  el.querySelectorAll('[data-unblock]').forEach(btn=>btn.onclick=async ()=>{
+    btn.disabled=true;
+    const { error } = await sb.from('blocks').delete().eq('blocker_id', session.user.id).eq('blocked_id', btn.dataset.unblock);
+    if(error){ toast('Could not unblock: '+error.message); btn.disabled=false; return; }
+    await loadBlocks(); renderBlockedList(); toast('Unblocked.');
+  });
 }
 // The ⚙️ button jumps to those settings on the Profile page.
 function openSettings(){
@@ -1748,6 +1809,20 @@ document.getElementById('setPrivacyBtn').onclick=()=>{ closeSettings(); openToS(
 document.getElementById('setLogoutBtn').onclick=async ()=>{
   closeSettings();
   await sb.auth.signOut();
+};
+document.getElementById('setDeleteBtn').onclick=async ()=>{
+  const typed=prompt('This permanently deletes your OnCall account. It can\'t be undone.\n\nType DELETE to confirm.');
+  if(typed===null) return;
+  if(typed.trim().toUpperCase()!=='DELETE'){ toast('Not deleted — you need to type DELETE.'); return; }
+  const btn=document.getElementById('setDeleteBtn');
+  btn.disabled=true; btn.textContent='Deleting…';
+  try{
+    await callFn('delete_account',{ confirm:'DELETE' });
+    try{ localStorage.removeItem('oncall_area'); localStorage.removeItem('oncall_saved'); }catch(e){}
+    state.tradeProfile=null; state.saved=[];
+    await sb.auth.signOut({ scope:'local' });
+    toast('Your account has been deleted.');
+  }catch(e){ toast(e.message); btn.disabled=false; btn.textContent='Delete my account'; }
 };
 
 function openToS(section, doc){
@@ -1852,7 +1927,7 @@ async function boot(){
   }
   document.getElementById('authScreen').style.display='none';
   document.querySelector('.shell').style.display='flex';
-  await loadMyProfile();
+  await Promise.all([loadMyProfile(), loadBlocks()]);
   if(!state.tradeProfile){ state.tab='profile'; }
   await handleReturnFromStripe();
   loadReviews().then(()=>renderCurrentTab());
