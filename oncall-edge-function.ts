@@ -162,11 +162,14 @@ async function createPaymentIntent(caller: any, body: any) {
 }
 
 // ---------- 1b. Stripe-hosted card page: authorize and hold the money ----------
-const ALLOWED_RETURN_PREFIX = "https://natb1234.github.io/oncall-app/";
+// The app lives at oncallapp.ie; the old GitHub Pages address still works (it redirects).
+const ALLOWED_RETURN_PREFIXES = ["https://oncallapp.ie/", "https://www.oncallapp.ie/", "https://natb1234.github.io/oncall-app/"];
+const isAllowedReturn = (u: unknown) =>
+  typeof u === "string" && ALLOWED_RETURN_PREFIXES.some((p) => u.startsWith(p));
 
 async function createCheckoutSession(caller: any, body: any) {
   const { taskId, bidId, returnUrl } = body;
-  if (typeof returnUrl !== "string" || !returnUrl.startsWith(ALLOWED_RETURN_PREFIX)) {
+  if (!isAllowedReturn(returnUrl)) {
     return json({ error: "Invalid return address." }, 400);
   }
   const { data: task } = await db.from("tasks").select("*").eq("id", taskId).single();
@@ -442,15 +445,15 @@ const WORKER_ACCOUNT_PREFILL = {
   business_type: "individual" as const,
   business_profile: {
     mcc: "7299", // Miscellaneous personal services
-    url: "https://natb1234.github.io/oncall-app/",
+    url: "https://oncallapp.ie/",
     product_description: "Small same-day local jobs (odd jobs, help around the home) booked and paid through OnCall.",
   },
 };
 
 async function connectOnboardingLink(caller: any, body: any) {
   const { returnUrl, refreshUrl } = body;
-  if (typeof returnUrl !== "string" || !returnUrl.startsWith(ALLOWED_RETURN_PREFIX) ||
-      typeof refreshUrl !== "string" || !refreshUrl.startsWith(ALLOWED_RETURN_PREFIX)) {
+  if (!isAllowedReturn(returnUrl) ||
+      !isAllowedReturn(refreshUrl)) {
     return json({ error: "Invalid return address." }, 400);
   }
   const { data: profile } = await db.from("profiles").select("*").eq("id", caller.id).single();
@@ -521,7 +524,7 @@ async function syncPremium(userId: string) {
 
 async function createPremiumCheckout(caller: any, body: any) {
   const { returnUrl } = body;
-  if (typeof returnUrl !== "string" || !returnUrl.startsWith(ALLOWED_RETURN_PREFIX)) {
+  if (!isAllowedReturn(returnUrl)) {
     return json({ error: "Invalid return address." }, 400);
   }
   if ((await syncPremium(caller.id)).active) return json({ error: "You already have Premium." }, 400);
@@ -563,7 +566,7 @@ function isFeatured(task: any) {
 
 async function createBoostCheckout(caller: any, body: any) {
   const { taskId, returnUrl } = body;
-  if (typeof returnUrl !== "string" || !returnUrl.startsWith(ALLOWED_RETURN_PREFIX)) {
+  if (!isAllowedReturn(returnUrl)) {
     return json({ error: "Invalid return address." }, 400);
   }
   const { data: task } = await db.from("tasks").select("*").eq("id", taskId).single();
@@ -660,7 +663,7 @@ async function submitReport(caller: any, body: any) {
 // date of birth or images, which stay with Stripe.
 async function startIdCheck(caller: any, body: any) {
   const { returnUrl } = body;
-  if (typeof returnUrl !== "string" || !returnUrl.startsWith(ALLOWED_RETURN_PREFIX)) {
+  if (!isAllowedReturn(returnUrl)) {
     return json({ error: "Invalid return address." }, 400);
   }
   const { data: profile } = await db.from("profiles").select("*").eq("id", caller.id).single();
@@ -747,7 +750,7 @@ async function syncIdCheck(userId: string) {
 
 // ---------- 8a. Reminder email to the poster ~4 hours before auto-release ----------
 const REMINDER_HOURS_BEFORE = 4;
-const APP_URL = "https://natb1234.github.io/oncall-app/";
+const APP_URL = "https://oncallapp.ie/";
 
 async function sendEmail(to: string, subject: string, html: string) {
   const key = Deno.env.get("RESEND_API_KEY");
